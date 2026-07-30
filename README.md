@@ -1,3 +1,17 @@
+自用节点，不强制安装。
+
+灵感来源不是 WebUI 的预设，但是写完以后突然发现和那玩意儿很像。
+
+改动主要是为 lora 加载器这个节点增添了「预设」功能，以及加了一个文本输入框可以填触发词，顺带改了个名。有人可能会问主播主播原来的 lora 加载器不是有触发词输出端口吗？但那个东西基于 Civitai 的 metadata，如果作者忘记写了那么还要自己手动添加，同时对于一些多合一的 lora（例如有很多套衣服的人物 lora）以及一些作者写了触发词但你觉得没写触发词表现会更好的情况，那这个框还是有点用的。更别提这个框甚至可以填画师串。~~当然如果你用的 Krea 2 或者 Zimage 那就没啥用了~~ 
+
+这个节点完全使用 Claude Opus 编写，包括 README。所以下文可能会有一些奇奇怪怪的表述。
+
+本人已自行测试该节点效果，可以使用。
+
+~~克劳德老师，我还记得你，一句一句，把我拉出 glm 里~~
+
+---
+
 # ComfyUI-Lora-Manager-Stylepack — 风格加载器
 
 [ComfyUI-Lora-Manager](https://github.com/willmiao/ComfyUI-Lora-Manager) 的可选附属包，
@@ -91,14 +105,9 @@ Nunchaku 检测、clip 强度处理等行为自动跟随。主包缺失时节点
 主包没有它时只打印一条警告，节点其余功能全部照常，仅「独立网页前端把 LoRA 发送到本节点」
 不可用。
 
-本包**不导入** `loras_widget_components.js` / `loras_widget_events.js`（即那套改在
-loras widget 里的预设代码），也不使用 `/api/lm/presets` 端点。所以本包的预设与主包
-（或你本地魔改）的预设是两套独立系统，可以共存 —— 节点上会同时看到本包的「预设」栏和
-魔改版的 `PRESETS (n)` 栏。
-
 ## 依赖的主包改动
 
-完整补丁见 `host-pack-changes.patch`（只含下列通用改动，不含任何预设魔改）。
+完整补丁见 `host-pack-changes.patch`。
 
 | 文件 | 改动 |
 |---|---|
