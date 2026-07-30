@@ -1,0 +1,15 @@
+[project]
+name = "comfyui-lora-manager-stylepack"
+description = "风格加载器 (Style Loader) — an optional companion node for ComfyUI-Lora-Manager that pairs a LoRA stack with preset text."
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp",
+]
+
+[project.urls]
+Repository = "https://github.com/willmiao/ComfyUI-Lora-Manager"
+
+[tool.comfy]
+PublisherId = "local"
+DisplayName = "ComfyUI-Lora-Manager-Stylepack"

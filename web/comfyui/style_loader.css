@@ -1,0 +1,442 @@
+/* 风格加载器 (Style Loader) widget styles.
+ *
+ * Visual language matches the host pack's lm_styles.css so the node does not
+ * look foreign next to the stock Lora Loader.
+ *
+ * Sizing note: no rule here sets `max-height` on a widget container. The host
+ * pack's dual-mode widget doc identifies that as the cause of node sizes
+ * springing back after a resize. Heights are driven by inline pixel values that
+ * the widget JS owns.
+ */
+
+/* ─── Text box ──────────────────────────────────────────────── */
+
+.lmsp-text-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 6px;
+  overflow: hidden;
+}
+
+/* Vue node mode: break the ResizeObserver feedback loop. The container's
+   intrinsic size comes solely from the inline height set by JS. */
+.lmsp-text-container.lmsp-vue-node {
+  contain: layout size;
+}
+
+/* Header row — always visible, carries the show/hide toggle. */
+
+.lmsp-text-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 26px;
+  padding: 0 2px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.lmsp-text-header-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.lmsp-text-chevron {
+  flex: 0 0 auto;
+  width: 10px;
+  color: rgba(226, 232, 240, 0.55);
+  font-size: 9px;
+  line-height: 1;
+}
+
+.lmsp-text-header-left:hover .lmsp-text-chevron {
+  color: rgba(226, 232, 240, 0.95);
+}
+
+.lmsp-text-header-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  color: rgba(226, 232, 240, 0.7);
+  white-space: nowrap;
+}
+
+.lmsp-text-header-left:hover .lmsp-text-header-label {
+  color: rgba(226, 232, 240, 0.95);
+}
+
+.lmsp-text-header-hint {
+  font-size: 10px;
+  font-style: italic;
+  color: rgba(66, 153, 224, 0.85);
+  white-space: nowrap;
+}
+
+/* Pill switch */
+.lmsp-text-switch {
+  flex: 0 0 auto;
+  position: relative;
+  width: 26px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid rgba(226, 232, 240, 0.22);
+  border-radius: 8px;
+  background-color: rgba(24, 27, 33, 0.9);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.lmsp-text-switch:hover {
+  border-color: rgba(226, 232, 240, 0.45);
+}
+
+.lmsp-text-switch-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: rgba(226, 232, 240, 0.55);
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.lmsp-text-switch--on {
+  background-color: rgba(66, 153, 224, 0.35);
+  border-color: #4299e0;
+}
+
+.lmsp-text-switch--on .lmsp-text-switch-knob {
+  transform: translateX(12px);
+  background-color: #4299e0;
+}
+
+/* Collapsible body */
+.lmsp-text-body {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.lmsp-textarea {
+  flex: 0 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none; /* height is owned by the drag handle */
+  padding: 6px 8px;
+  border: 1px solid rgba(226, 232, 240, 0.18);
+  border-radius: 6px;
+  background-color: rgba(24, 27, 33, 0.85);
+  color: rgba(226, 232, 240, 0.95);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  outline: none;
+  overflow-y: auto;
+}
+
+.lmsp-textarea::placeholder {
+  color: rgba(226, 232, 240, 0.35);
+}
+
+.lmsp-textarea:focus {
+  border-color: #4299e0;
+}
+
+.lmsp-text-resize-handle {
+  flex: 0 0 auto;
+  height: 8px;
+  margin-top: 1px;
+  cursor: ns-resize;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+}
+
+/* Grip indicator */
+.lmsp-text-resize-handle::after {
+  content: "";
+  width: 28px;
+  height: 2px;
+  border-radius: 2px;
+  background-color: rgba(226, 232, 240, 0.22);
+  transition: background-color 0.15s ease;
+}
+
+.lmsp-text-resize-handle:hover::after,
+.lmsp-text-resize-handle--active::after {
+  background-color: #4299e0;
+}
+
+/* Keep the resize cursor while dragging, even outside the handle. */
+body.lmsp-text-resizing,
+body.lmsp-text-resizing * {
+  cursor: ns-resize !important;
+  user-select: none !important;
+}
+
+/* ─── Preset panel ──────────────────────────────────────────── */
+
+.lmsp-presets-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 6px;
+  overflow: hidden;
+  color: rgba(226, 232, 240, 0.9);
+  font-size: 12px;
+}
+
+.lmsp-presets-container.lmsp-vue-node {
+  contain: layout size;
+}
+
+.lmsp-presets-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 26px;
+  padding: 0 2px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.12);
+  user-select: none;
+}
+
+.lmsp-presets-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.lmsp-presets-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  color: rgba(226, 232, 240, 0.7);
+  white-space: nowrap;
+}
+
+.lmsp-presets-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: rgba(226, 232, 240, 0.6);
+  cursor: pointer;
+}
+
+.lmsp-presets-toggle:hover {
+  color: rgba(226, 232, 240, 0.95);
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.lmsp-presets-save {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border: 1px solid rgba(226, 232, 240, 0.16);
+  border-radius: 4px;
+  background: none;
+  color: rgba(226, 232, 240, 0.7);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lmsp-presets-save:hover {
+  color: #fff;
+  border-color: #4299e0;
+  background-color: rgba(66, 153, 224, 0.15);
+}
+
+.lmsp-presets-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 2px;
+}
+
+.lmsp-presets-message {
+  padding: 7px 4px;
+  color: rgba(226, 232, 240, 0.45);
+  font-size: 11px;
+  font-style: italic;
+  text-align: center;
+}
+
+.lmsp-presets-message--error {
+  color: #f56565;
+  font-style: normal;
+}
+
+/* Preset row */
+
+.lmsp-preset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 24px;
+  padding: 0 2px;
+  border-radius: 4px;
+}
+
+.lmsp-preset-row:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.lmsp-preset-info {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.lmsp-preset-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 1px;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: rgba(226, 232, 240, 0.55);
+  cursor: pointer;
+}
+
+.lmsp-preset-expand:hover {
+  color: rgba(226, 232, 240, 0.95);
+}
+
+.lmsp-preset-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lmsp-preset-badge {
+  flex: 0 0 auto;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background-color: rgba(66, 153, 224, 0.22);
+  color: rgba(226, 232, 240, 0.85);
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}
+
+.lmsp-preset-badge--text {
+  background-color: rgba(159, 122, 234, 0.25);
+}
+
+.lmsp-preset-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+
+.lmsp-preset-load {
+  padding: 1px 8px;
+  border: 1px solid rgba(66, 153, 224, 0.45);
+  border-radius: 4px;
+  background-color: rgba(66, 153, 224, 0.12);
+  color: rgba(226, 232, 240, 0.92);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lmsp-preset-load:hover {
+  background-color: rgba(66, 153, 224, 0.3);
+  color: #fff;
+}
+
+.lmsp-preset-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: rgba(226, 232, 240, 0.5);
+  cursor: pointer;
+}
+
+.lmsp-preset-icon-btn:hover {
+  color: rgba(226, 232, 240, 0.95);
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.lmsp-preset-icon-btn--danger:hover {
+  color: #f56565;
+  background-color: rgba(245, 101, 101, 0.14);
+}
+
+/* Expanded preset contents */
+
+.lmsp-preset-detail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 18px;
+  padding: 0 4px 0 20px;
+  color: rgba(226, 232, 240, 0.6);
+  font-size: 11px;
+}
+
+.lmsp-preset-detail--inactive {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.lmsp-preset-detail-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lmsp-preset-detail-strength {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: rgba(226, 232, 240, 0.75);
+}
+
+.lmsp-preset-text-preview {
+  margin: 2px 4px 4px 20px;
+  padding: 3px 6px;
+  max-height: 36px;
+  overflow: hidden;
+  border-left: 2px solid rgba(159, 122, 234, 0.5);
+  border-radius: 0 3px 3px 0;
+  background-color: rgba(255, 255, 255, 0.04);
+  color: rgba(226, 232, 240, 0.6);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

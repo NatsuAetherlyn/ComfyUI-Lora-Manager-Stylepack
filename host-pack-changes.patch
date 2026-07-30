@@ -1,0 +1,261 @@
+diff --git a/py/routes/handlers/misc_handlers.py b/py/routes/handlers/misc_handlers.py
+index 5a259e1f..40f2038d 100644
+--- a/py/routes/handlers/misc_handlers.py
++++ b/py/routes/handlers/misc_handlers.py
+@@ -49,6 +49,7 @@ from ...utils.models import BaseModelMetadata
+ from ...utils.constants import (
+     CIVITAI_USER_MODEL_TYPES,
+     DEFAULT_NODE_COLOR,
++    NODE_TYPE_EXTENSION_LORA,
+     NODE_TYPES,
+     PREVIEW_EXTENSIONS,
+     SUPPORTED_MEDIA_EXTENSIONS,
+@@ -542,6 +543,13 @@ class NodeRegistry:
+         if "supports_lora" in capabilities:
+             capabilities["supports_lora"] = bool(capabilities["supports_lora"])
+ 
++            # LoRA-capable node classes contributed by companion packs are not
++            # in NODE_TYPES, which would leave them at type 0 and give them the
++            # generic "unknown" icon in the node selector. Assign the shared
++            # extension type so the UI can render them properly.
++            if type_id == 0 and capabilities["supports_lora"]:
++                type_id = NODE_TYPE_EXTENSION_LORA
++
+         comfy_class = node.get("comfy_class")
+         if not isinstance(comfy_class, str) or not comfy_class:
+             comfy_class = node_type if isinstance(node_type, str) else None
+diff --git a/py/utils/constants.py b/py/utils/constants.py
+index 99fcc5d9..cf821584 100644
+--- a/py/utils/constants.py
++++ b/py/utils/constants.py
+@@ -14,6 +14,11 @@ NODE_TYPES = {
+     "WanVideo Lora Select (LoraManager)": 3,
+ }
+ 
++# Shared type id for LoRA-capable nodes contributed by companion packs. These
++# are absent from NODE_TYPES but still advertise supports_lora, so they get a
++# dedicated id instead of falling back to 0 ("unknown").
++NODE_TYPE_EXTENSION_LORA = 99
++
+ # Default ComfyUI node color when bgcolor is null
+ DEFAULT_NODE_COLOR = "#353535"
+ 
+diff --git a/static/js/utils/constants.js b/static/js/utils/constants.js
+index bb91c52d..bf495140 100644
+--- a/static/js/utils/constants.js
++++ b/static/js/utils/constants.js
+@@ -369,7 +369,10 @@ export function getMatureBlurThreshold(settings = {}) {
+ export const NODE_TYPES = {
+     LORA_LOADER: 1,
+     LORA_STACKER: 2,
+-    WAN_VIDEO_LORA_SELECT: 3
++    WAN_VIDEO_LORA_SELECT: 3,
++    // Shared id for LoRA-capable nodes contributed by companion packs.
++    // Must stay in sync with NODE_TYPE_EXTENSION_LORA in py/utils/constants.py.
++    EXTENSION_LORA: 99
+ };
+ 
+ // Node type names to IDs mapping
+@@ -383,7 +386,8 @@ export const NODE_TYPE_NAMES = {
+ export const NODE_TYPE_ICONS = {
+     [NODE_TYPES.LORA_LOADER]: "fas fa-l",
+     [NODE_TYPES.LORA_STACKER]: "fas fa-s",
+-    [NODE_TYPES.WAN_VIDEO_LORA_SELECT]: "fas fa-w"
++    [NODE_TYPES.WAN_VIDEO_LORA_SELECT]: "fas fa-w",
++    [NODE_TYPES.EXTENSION_LORA]: "fas fa-puzzle-piece"
+ };
+ 
+ // Default ComfyUI node color when bgcolor is null
+diff --git a/web/comfyui/lora_loader.js b/web/comfyui/lora_loader.js
+index 2b72e635..472ef4b6 100644
+--- a/web/comfyui/lora_loader.js
++++ b/web/comfyui/lora_loader.js
+@@ -9,6 +9,7 @@ import {
+   getNodeFromGraph,
+   getWidgetByName,
+   getWidgetSerializedValue,
++  isLoraNodeClass,
+ } from "./utils.js";
+ import { addLorasWidget } from "./loras_widget.js";
+ import { applyLoraValuesToText, debounce } from "./lora_syntax_utils.js";
+@@ -61,12 +62,7 @@ app.registerExtension({
+ 
+     // Standard mode - update a specific node
+     const node = getNodeFromGraph(graphId, numericNodeId);
+-    if (
+-      !node ||
+-      (node.comfyClass !== "Lora Loader (LoraManager)" &&
+-        node.comfyClass !== "Lora Stacker (LoraManager)" &&
+-        node.comfyClass !== "WanVideo Lora Select (LoraManager)")
+-    ) {
++    if (!node || !isLoraNodeClass(node.comfyClass)) {
+       console.warn(
+         "Node not found or not a LoraLoader:",
+         graphId ?? "root",
+diff --git a/web/comfyui/trigger_word_highlight.js b/web/comfyui/trigger_word_highlight.js
+index 5eee6576..5b4bd2df 100644
+--- a/web/comfyui/trigger_word_highlight.js
++++ b/web/comfyui/trigger_word_highlight.js
+@@ -3,17 +3,12 @@ import {
+   getConnectedTriggerToggleNodes,
+   getLinkFromGraph,
+   getNodeKey,
++  isLoraNodeClass,
+ } from "./utils.js";
+ 
+ const TRIGGER_WORD_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+ const triggerWordCache = new Map();
+ 
+-const LORA_NODE_CLASSES = new Set([
+-  "Lora Loader (LoraManager)",
+-  "Lora Stacker (LoraManager)",
+-  "WanVideo Lora Select (LoraManager)",
+-]);
+-
+ function normalizeTriggerWordList(triggerWords) {
+   if (!triggerWords) {
+     return [];
+@@ -141,7 +136,7 @@ function highlightNodeRecursive(node, triggerWords, visited) {
+         continue;
+       }
+ 
+-      if (LORA_NODE_CLASSES.has(targetNode.comfyClass)) {
++      if (isLoraNodeClass(targetNode.comfyClass)) {
+         highlightNodeRecursive(targetNode, triggerWords, visited);
+       }
+     }
+diff --git a/web/comfyui/utils.js b/web/comfyui/utils.js
+index 31a125ae..2ce0b23a 100644
+--- a/web/comfyui/utils.js
++++ b/web/comfyui/utils.js
+@@ -31,6 +31,85 @@ export function isLoraChainNode(comfyClass) {
+     return LORA_CHAIN_NODE_TYPES.includes(comfyClass);
+ }
+ 
++/**
++ * Single source of truth for "this node class holds a LoRA widget".
++ *
++ * Governs three behaviours: whether a node is advertised to the standalone
++ * web UI as a LoRA target, whether it accepts `lora_code_update` messages,
++ * and whether trigger-word highlighting traverses through it.
++ *
++ * Companion packs (subpacks) extend this instead of patching the callers.
++ */
++const LORA_NODE_CLASSES = new Set([
++  "Lora Loader (LoraManager)",
++  "Lora Stacker (LoraManager)",
++  "WanVideo Lora Select (LoraManager)",
++]);
++
++// Terminal loaders end a LoRA chain: they apply LoRAs to a model rather than
++// forwarding a LORA_STACK. Only these receive aggregated trigger word updates
++// from upstream chain nodes.
++const TERMINAL_LORA_LOADER_CLASSES = new Set([
++  "Lora Loader (LoraManager)",
++]);
++
++/**
++ * Register an additional LoRA-capable node class.
++ * @param {string} comfyClass - The node's comfyClass identifier.
++ * @param {{terminal?: boolean}} [options] - Set `terminal` when the node
++ *   applies LoRAs to a model (like Lora Loader) rather than forwarding a stack.
++ * @returns {boolean} True when the name was accepted.
++ */
++export function registerLoraNodeClass(comfyClass, options = {}) {
++  if (typeof comfyClass !== "string" || !comfyClass) {
++    return false;
++  }
++  LORA_NODE_CLASSES.add(comfyClass);
++  if (options?.terminal) {
++    TERMINAL_LORA_LOADER_CLASSES.add(comfyClass);
++  }
++  return true;
++}
++
++// Subpacks whose scripts load before this module can seed the registry via a
++// global array; ComfyUI does not guarantee extension script order. Entries may
++// be a bare class name or `{ name, terminal }`.
++if (typeof window !== "undefined" && Array.isArray(window.__LM_EXTRA_LORA_NODE_CLASSES)) {
++  for (const entry of window.__LM_EXTRA_LORA_NODE_CLASSES) {
++    if (typeof entry === "string") {
++      registerLoraNodeClass(entry);
++    } else if (entry && typeof entry.name === "string") {
++      registerLoraNodeClass(entry.name, { terminal: !!entry.terminal });
++    }
++  }
++}
++
++/**
++ * Test whether a node class holds a LoRA widget.
++ * @param {string} comfyClass
++ * @returns {boolean}
++ */
++export function isLoraNodeClass(comfyClass) {
++  return LORA_NODE_CLASSES.has(comfyClass);
++}
++
++/**
++ * Test whether a node class terminates a LoRA chain by applying LoRAs.
++ * @param {string} comfyClass
++ * @returns {boolean}
++ */
++export function isTerminalLoraLoaderClass(comfyClass) {
++  return TERMINAL_LORA_LOADER_CLASSES.has(comfyClass);
++}
++
++/**
++ * Snapshot of every registered LoRA-capable node class.
++ * @returns {string[]}
++ */
++export function getLoraNodeClasses() {
++  return Array.from(LORA_NODE_CLASSES);
++}
++
+ function isMapLike(collection) {
+     return collection && typeof collection.entries === "function" && typeof collection.values === "function";
+ }
+@@ -887,10 +966,11 @@ export function updateDownstreamLoaders(startNode, visited = new Set()) {
+           if (link) {
+             const targetNode = startNode.graph?.getNodeById?.(link.target_id);
+ 
+-            // If target is a Lora Loader, collect all active loras in the chain and update
++            // If target is a terminal LoRA loader, collect all active loras in
++            // the chain and update. Registered subpack loaders qualify too.
+             if (
+               targetNode &&
+-              targetNode.comfyClass === "Lora Loader (LoraManager)"
++              isTerminalLoraLoaderClass(targetNode.comfyClass)
+             ) {
+               const allActiveLoraNames =
+                 collectActiveLorasFromChain(targetNode);
+diff --git a/web/comfyui/workflow_registry.js b/web/comfyui/workflow_registry.js
+index 32b4b994..fe25e422 100644
+--- a/web/comfyui/workflow_registry.js
++++ b/web/comfyui/workflow_registry.js
+@@ -1,16 +1,10 @@
+ import { app } from "../../scripts/app.js";
+ import { api } from "../../scripts/api.js";
+-import { getAllGraphNodes, getNodeReference, getNodeFromGraph, chainCallback, getLinkFromGraph } from "./utils.js";
++import { getAllGraphNodes, getNodeReference, getNodeFromGraph, chainCallback, getLinkFromGraph, isLoraNodeClass } from "./utils.js";
+ import { ensureLmStyles } from "./lm_styles_loader.js";
+ 
+ const DEBOUNCE_DELAY = 500;
+ 
+-const LORA_NODE_CLASSES = new Set([
+-    "Lora Loader (LoraManager)",
+-    "Lora Stacker (LoraManager)",
+-    "WanVideo Lora Select (LoraManager)",
+-]);
+-
+ const TARGET_WIDGET_NAMES = new Set(["ckpt_name", "unet_name"]);
+ 
+ // Node classes whose "text" widget is a prompt text input (not LoRA syntax, notes, etc.)
+@@ -245,7 +239,7 @@ app.registerExtension({
+                           .filter((name) => typeof name === "string" && name.length > 0)
+                     : [];
+ 
+-                const supportsLora = LORA_NODE_CLASSES.has(node.comfyClass);
++                const supportsLora = isLoraNodeClass(node.comfyClass);
+                 const hasTargetWidget = widgetNames.some((name) => TARGET_WIDGET_NAMES.has(name));
+                 const hasTextWidget = TEXT_CAPABLE_CLASSES.has(node.comfyClass);
+                 const markerRole = node.properties?.lm_marker_role ?? null;
