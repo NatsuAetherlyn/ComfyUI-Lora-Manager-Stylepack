@@ -1,29 +1,30 @@
-自用节点，不强制安装。
+# ComfyUI-Lora-Manager-Stylepack
 
-灵感来源不是 WebUI 的预设，但是写完以后突然发现和那玩意儿很像。
+[ComfyUI-Lora-Manager](https://github.com/willmiao/ComfyUI-Lora-Manager) 的可选附属包，为它补一个「风格加载器」节点。形态类似 Impact-Pack 与 Impact-Subpack 的关系：主包不用动，把本目录放进 `custom_nodes` 就会多出这个节点。
 
-改动主要是为 lora 加载器这个节点增添了「预设」功能，以及加了一个文本输入框可以填触发词，顺带改了个名。有人可能会问主播主播原来的 lora 加载器不是有触发词输出端口吗？但那个东西基于 Civitai 的 metadata，如果作者忘记写了那么还要自己手动添加，同时对于一些多合一的 lora（例如有很多套衣服的人物 lora）以及一些作者写了触发词但你觉得没写触发词表现会更好的情况，那这个框还是有点用的。更别提这个框甚至可以填画师串。~~当然如果你用的 Krea 2 或者 Zimage 那就没啥用了~~ 
+一句话概括它做的事：**给主包的 Lora 加载器加上预设功能**——可以把「LoRA 栈 + 一段文本」整体存成预设、一键恢复；文本框本身可开关，常用来填触发词或画师串。
 
-这个节点完全使用 Claude Opus 编写，包括 README。所以下文可能会有一些奇奇怪怪的表述。
+自用节点，按个人需求开发，随缘更新。
 
-本人已自行测试该节点效果，可以使用。
+## 为什么还需要一个文本框？
 
-~~克劳德老师，我还记得你，一句一句，把我拉出 glm 里~~
+主包的 Lora 加载器本身有触发词输出端口，但它读的是 Civitai metadata——作者没填，这里就是空的。而且下面这些情况它也覆盖不了：
 
----
+- 多合一 LoRA（比如一个角色带好几套衣服），想按套切换触发词；
+- 某些 LoRA 你觉得不带触发词表现反而更好，想临时改一版；
+- 直接粘一整段画师串。
 
-# ComfyUI-Lora-Manager-Stylepack — 风格加载器
+当然，如果你主力用 Krea 2、Z-Image 这类基本吃自然语言描述的模型，这个文本框对你没什么用。
 
-[ComfyUI-Lora-Manager](https://github.com/willmiao/ComfyUI-Lora-Manager) 的可选附属包，
-形态类似 `ComfyUI-Impact-Subpack` 与 `ComfyUI-Impact-Pack` 的关系：主包不含本节点，
-装上这个目录才会出现。
+## 安装
 
-## 节点：风格加载器
+1. 先装好 [ComfyUI-Lora-Manager](https://github.com/willmiao/ComfyUI-Lora-Manager)；
+2. 把本仓库克隆或解压到 `ComfyUI/custom_nodes/ComfyUI-Lora-Manager-Stylepack`；
+3. 重启 ComfyUI。
 
-内部类名 `Style Loader (LoraManager)`，菜单显示为**风格加载器**，
-位于 `Lora Manager/loaders` 分类下。
+节点位于 `Lora Manager/loaders` 分类下，显示名**风格加载器**（内部类名 `Style Loader (LoraManager)`）。默认行为与主包的「Lora 加载器」完全一致，额外提供下述功能。
 
-默认行为与主包的「Lora 加载器」一致，额外提供一个可开关的文本框和预设功能。
+## 节点说明
 
 ### 端口
 
@@ -33,40 +34,29 @@
 | CLIP | CLIP | 已套用 LoRA 的 CLIP |
 | 触发词 | STRING | 所有已启用 LoRA 的触发词 |
 | 已加载Lora | STRING | `<lora:name:strength>` 语法串 |
-| **预设文本** | STRING | **文本框内容** |
+| **预设文本** | STRING | 文本框内容 |
 
-输入：`model`（必需）、`clip`、`lora_stack`（可选）。LoRA 搜索框、LoRA 列表与
-文本框都是前端组件。
+输入：`model`（必需）、`clip`、`lora_stack`（可选）。LoRA 搜索框、LoRA 列表与文本框都是前端组件。
 
 ### 文本框
 
-- **默认关闭**，节点上常驻一行「预设文本」标题栏，右侧有开关；点标题或开关即可展开。
-  （右键菜单里也有同样的开关，作为备用入口。）
-- 关闭且内有文本时，标题栏会显示 `(N 字)` 提示，不会让内容藏得无声无息。
-- 开启时节点会自动长高一次，不会出现文本框超出节点的情况。
-- **放大节点只会拉长 LoRA 列表，文本框高度不变** —— 与 Lora 加载器的手感一致。
-- 文本框只能通过它下方的拖动手柄改变高度。
-- 开关状态与高度随工作流保存。
-
-实现上刻意不使用 `max-height` / `getMaxHeight()`：主包的
-`docs/comfyui-dual-mode-widgets.md` 明确指出那是「节点尺寸改完又自己弹回去」的根因。
-Canvas 模式下文本框声明 `computeSize` 拿到固定高度，LoRA 列表不声明因而吸收所有富余
-空间（所以不会留白）；Vue 模式下改用 `contain: layout size` 打断 ResizeObserver 回环。
-`node.setSize()` 只在离散用户操作（开关、拖拽结束）时调用一次，渲染路径中完全不调用。
+- 默认关闭。节点上常驻一行「预设文本」标题栏，点标题或右侧开关即可展开（右键菜单里也有同样的开关，作为备用入口）。
+- 折叠但里面有内容时，标题栏会显示 `(N 字)` 提示，不会让内容无声无息地消失。
+- 展开时节点会自动长高；**拖大节点只会拉长 LoRA 列表，文本框高度不受影响**——手感与主包的加载器一致。
+- 文本框高度只能通过它下方的拖动手柄调整。
+- 开关状态与高度都随工作流保存。
 
 ### 预设
 
-预设**同时保存 LoRA 栈和文本框内容**，载入时两者一起恢复 —— 不会出现「存到后来只剩
-文本」的情况。每条 LoRA 记录 `name / strength / clipStrength / active / expanded`。
+- 预设**同时保存 LoRA 栈和文本框内容**，载入时两者一起恢复，不会只回来一半。
+- 每条 LoRA 记录 `name / strength / clipStrength / active / expanded`。
+- 面板支持：保存（同名时询问是否覆盖）、展开查看内容、载入（覆盖前确认）、重命名、删除。
 
-节点内预设面板支持：保存（同名时询问是否覆盖）、展开查看内容、载入（覆盖前确认）、
-重命名、删除。
+## 存储与 API
 
-存储位置为 LoRA Manager 设置目录下的 `style_presets.json`，与主包自身的预设文件互不
-干扰。写入采用临时文件 + `os.replace` 的原子替换；文件损坏时会重命名为
-`.corrupt` 保留而非直接丢弃。
+预设集中存放在 `<ComfyUI>/user/lora_manager_stylepack/style_presets.json`，与主包自身的预设文件互不干扰，也不怕主包更新。写入采用「临时文件 + `os.replace`」的原子替换；文件万一损坏，会改名成 `.corrupt` 保留现场，不会直接丢数据。
 
-API：
+前端面板走的就是这几个接口，也可以自行调用：
 
 ```
 GET    /api/lm/style-presets
@@ -77,37 +67,19 @@ DELETE /api/lm/style-presets/{id}
 
 ## 与主包的关系
 
-**Python**：`py/host_bridge.py` 在运行时定位已加载的主包，直接复用
-`py/nodes/lora_loader.py` 的内部辅助函数，不复制 LoRA 加载逻辑 —— 主包升级后
-Nunchaku 检测、clip 强度处理等行为自动跟随。主包缺失时节点仍会注册，并在执行时
-给出明确错误，不会让 ComfyUI 启动失败。
+- **Python**：`py/host_bridge.py` 在运行时定位主包，直接复用 `py/nodes/lora_loader.py` 的内部辅助函数，不复制 LoRA 加载逻辑——主包升级后 Nunchaku 检测、clip 强度处理等行为自动跟随。主包缺失时节点仍会注册，执行时给出明确错误，不会拖垮 ComfyUI 启动。
+- **前端**：从 `/extensions/ComfyUI-Lora-Manager/` 动态导入主包的 `loras_widget.js` 等模块（同时探测小写前缀作为降级）。
+- **独立网页前端**：通过主包新增的通用扩展点 `registerLoraNodeClass()` 注册自己；注册后网页 UI 的「发送到节点」列表会包含风格加载器，`lora_code_update` 消息也能被正确接收。
 
-**前端**：从 `/extensions/ComfyUI-Lora-Manager/` 动态导入主包的
-`loras_widget.js` 等模块（同时探测小写前缀作为降级）。
+### 与官方未修改主包的兼容性
 
-**独立网页前端联动**：主包新增了通用扩展点 `registerLoraNodeClass()`，本包据此注册
-自己。注册后独立网页 UI 的「发送到节点」列表会包含风格加载器，`lora_code_update`
-消息也会被正确接受。
+**兼容。** 本包只导入主包官方就有的导出（`collectActiveLorasFromChain`、`addLorasWidget`、`applyLoraValuesToText` 等）。唯一的新增依赖是 `registerLoraNodeClass`，代码做了存在性判断：主包没有它时只打印一条警告，其余功能全部照常，仅「网页前端把 LoRA 发送到本节点」不可用。
 
-> 本包不修改主包的 Vue widget bundle。`AUTOCOMPLETE_TEXT_LORAS` 是按**输入类型**
-> 注册的，所以声明该输入即可获得 LoRA 搜索框。
+> 本包不修改主包的 Vue widget bundle。`AUTOCOMPLETE_TEXT_LORAS` 是按**输入类型**注册的，声明该输入即可获得 LoRA 搜索框。
 
-## 与官方未修改主包的兼容性
+### 对主包本身的改动
 
-**兼容。** 本包只从主包导入官方就有的导出：`utils.js` 的
-`collectActiveLorasFromChain` / `updateConnectedTriggerWords` / `chainCallback` /
-`mergeLoras` / `getWidgetByName` / `getWidgetSerializedValue`、
-`loras_widget.js` 的 `addLorasWidget`、`lora_syntax_utils.js` 的
-`applyLoraValuesToText` / `debounce`、`trigger_word_highlight.js` 的
-`applySelectionHighlight`、`lora_info.js` 的 `updateConnectedLoraInfoNodes`。
-
-唯一的新增依赖是 `registerLoraNodeClass`，代码里做了 `typeof === "function"` 判断：
-主包没有它时只打印一条警告，节点其余功能全部照常，仅「独立网页前端把 LoRA 发送到本节点」
-不可用。
-
-## 依赖的主包改动
-
-完整补丁见 `host-pack-changes.patch`。
+有一个扩展点需要主包侧配合改动，完整补丁见 `host-pack-changes.patch`：
 
 | 文件 | 改动 |
 |---|---|
@@ -121,15 +93,17 @@ Nunchaku 检测、clip 强度处理等行为自动跟随。主包缺失时节点
 
 ## 测试
 
-本仓库没有安装 `node_modules` 或 `pytest`，因此测试文件全部零依赖、可直接运行：
+测试文件全部零依赖，有 Node（前端）和 Python 3.10+（后端）就能跑：
 
 ```bash
-node tests/frontend/sizing.test.mjs         # 56 项文本框尺寸与开关契约检查
-node tests/frontend/serialization.test.mjs  # 14 项 widget 值序列化对齐检查
-python tests/test_style_preset_service.py   # 19 项预设存储检查
+node tests/frontend/sizing.test.mjs          # 文本框尺寸与开关行为
+node tests/frontend/presets_sizing.test.mjs  # 预设面板展开/收起不得重置用户调整过的节点尺寸
+node tests/frontend/serialization.test.mjs   # widget 值序列化对齐
+python tests/test_style_preset_service.py    # 预设存储
 ```
 
-`serialization.test.mjs` 守护一个容易复发的坑：LiteGraph 的 `serialize()` 按位置写
-`widgets_values[n]`（跳过不序列化的 widget，留下空洞），而 `configure()` 是顺序读取并
-跳过不序列化的 widget。两者只要中间夹了一个 `serialize = false` 的 widget 就会错位一格，
-表现为**每次重新载入工作流后 LoRA 列表被清空**。因此本节点所有 widget 均保持序列化。
+`serialization.test.mjs` 守护一个容易复发的坑：LiteGraph 的 `serialize()` 按位置写 `widgets_values[n]`（跳过不序列化的 widget 会留下空洞），而 `configure()` 是顺序读取并跳过同类 widget——中间只要夹了一个 `serialize = false` 的 widget，两边就会错位一格，表现为**每次重新载入工作流后 LoRA 列表被清空**。因此本节点所有 widget 均保持序列化。
+
+## 其他
+
+代码主要由 Claude (Opus) 辅助编写。
