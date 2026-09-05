@@ -20,7 +20,14 @@
 
 1. 先装好 [ComfyUI-Lora-Manager](https://github.com/willmiao/ComfyUI-Lora-Manager)；
 2. 把本仓库克隆或解压到 `ComfyUI/custom_nodes/ComfyUI-Lora-Manager-Stylepack`；
-3. 重启 ComfyUI。
+3. **运行一次注册脚本**（给主包打上兼容补丁，详见下文「对主包本身的改动」）：
+
+   ```bash
+   python scripts/register_with_host.py
+   ```
+
+   脚本会自动定位同目录下的主包；主包在别处时把路径传进去即可：`python scripts/register_with_host.py <主包路径>`。
+4. 重启 ComfyUI（浏览器端最好硬刷新一次，清掉旧的前端缓存）。
 
 节点位于 `Lora Manager/loaders` 分类下，显示名**风格加载器**（内部类名 `Style Loader (LoraManager)`）。默认行为与主包的「Lora 加载器」完全一致，额外提供下述功能。
 
@@ -69,7 +76,7 @@ DELETE /api/lm/style-presets/{id}
 
 - **Python**：`py/host_bridge.py` 在运行时定位主包，直接复用 `py/nodes/lora_loader.py` 的内部辅助函数，不复制 LoRA 加载逻辑——主包升级后 Nunchaku 检测、clip 强度处理等行为自动跟随。主包缺失时节点仍会注册，执行时给出明确错误，不会拖垮 ComfyUI 启动。
 - **前端**：从 `/extensions/ComfyUI-Lora-Manager/` 动态导入主包的 `loras_widget.js` 等模块（同时探测小写前缀作为降级）。
-- **独立网页前端**：通过主包新增的通用扩展点 `registerLoraNodeClass()` 注册自己；注册后网页 UI 的「发送到节点」列表会包含风格加载器，`lora_code_update` 消息也能被正确接收。
+- **独立网页前端**：通过注册脚本在主包侧新增的通用扩展点 `registerLoraNodeClass()` 注册自己；注册后网页 UI 的「发送到节点」列表会包含风格加载器，`lora_code_update` 消息也能被正确接收。
 
 ### 与官方未修改主包的兼容性
 
@@ -79,7 +86,17 @@ DELETE /api/lm/style-presets/{id}
 
 ### 对主包本身的改动
 
-有一个扩展点需要主包侧配合改动，完整补丁见 `host-pack-changes.patch`：
+有一个扩展点需要主包侧配合改动。安装脚本 `scripts/register_with_host.py` 会替你打好这套补丁——它不是傻乎乎地对行号打 `git apply`，而是把每处改动锚定到具体的代码片段，所以能容忍主包的正常更新；同一个改动打两遍是空操作（幂等），改前会自动把原文件备份到主包下的 `.lmstylepack-backup/`。
+
+| 命令 | 作用 |
+|---|---|
+| `python scripts/register_with_host.py` | 打补丁（自动定位主包，或传入主包路径） |
+| `python scripts/register_with_host.py --check` | 只报告哪些文件还没打，不改动 |
+| `python scripts/register_with_host.py --restore` | 从备份还原主包原文件 |
+
+如果主包哪天改到锚点都对不上了，脚本会报出具体是哪个文件、哪处对不上，并原样保持你的文件不动（不会打一半）。这时请带上主包版本号到 [Issues](https://github.com/NatsuAetherlyn/ComfyUI-Lora-Manager-Stylepack/issues) 反馈。
+
+偏好手动的话，也可以直接用 `git apply host-pack-changes.patch` 打同一份改动。补丁内容一览：
 
 | 文件 | 改动 |
 |---|---|
