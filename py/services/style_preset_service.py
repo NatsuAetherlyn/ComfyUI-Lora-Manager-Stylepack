@@ -6,9 +6,10 @@ A style preset bundles two things that belong together:
   expanded flags), so loading a preset restores the exact LoRA stack.
 * ``text``  — free-form text such as trigger words or artist strings.
 
-Storage is a single JSON file, ``style_presets.json``, in the LoRA Manager
-settings directory. It is deliberately separate from the host pack's own
-preset file so the two features never interfere.
+Storage is a single JSON file, ``style_presets.json``, inside the Stylepack
+preset directory (``<ComfyUI user dir>/lora_manager_stylepack``). It is
+deliberately separate from the host pack's own preset file so the two
+features never interfere, and survives host-pack updates.
 """
 
 from __future__ import annotations

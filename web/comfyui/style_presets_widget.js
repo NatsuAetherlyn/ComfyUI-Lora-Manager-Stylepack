@@ -101,8 +101,15 @@ export function addStylePresetsWidget(node, name, handlers) {
     return HEADER_HEIGHT + Math.min(listHeight, MAX_LIST_HEIGHT);
   };
 
+  // Height this widget last reported to LiteGraph. Callers mutate panel state
+  // (expanded / presets / loadState) *before* calling resizeNode, so measuring
+  // twice around applyLayout would always yield a zero delta. Tracking the last
+  // applied value is what makes the delta meaningful.
+  let appliedHeight = measureHeight();
+
   const applyLayout = () => {
     const height = measureHeight();
+    appliedHeight = height;
     container.style.height = `${height}px`;
 
     // `computeLayoutSize` lives on DOMWidgetImpl.prototype, so it must be
@@ -128,12 +135,34 @@ export function addStylePresetsWidget(node, name, handlers) {
     }
   };
 
+  /**
+   * Re-layout, then grow/shrink the node by exactly this panel's height change.
+   *
+   * Deliberately *not* `node.setSize(node.computeSize())`: computeSize() reports
+   * the node's *minimum* height, so snapping to it would throw away the extra
+   * space the user dragged out — expanding the preset list would collapse the
+   * node back to its default size. A delta keeps the user's sizing intact.
+   */
   const resizeNode = () => {
+    const before = appliedHeight;
     applyLayout();
-    if (typeof node.computeSize === "function") {
-      const computed = node.computeSize();
-      const width = node.size?.[0] ?? computed[0];
-      node.setSize([Math.max(width, computed[0]), computed[1]]);
+    const delta = appliedHeight - before;
+
+    if (delta && typeof node.setSize === "function") {
+      const width = node.size?.[0] ?? 0;
+      const currentHeight = node.size?.[1] ?? 0;
+      let nextHeight = currentHeight + delta;
+
+      // Respect the node minimum so shrinking cannot clip other widgets.
+      if (typeof node.computeSize === "function") {
+        const minHeight = node.computeSize()[1];
+        if (nextHeight < minHeight) {
+          nextHeight = minHeight;
+        }
+      }
+      if (nextHeight !== currentHeight) {
+        node.setSize([width, nextHeight]);
+      }
     }
     node.setDirtyCanvas?.(true, true);
   };

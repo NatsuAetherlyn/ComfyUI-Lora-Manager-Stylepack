@@ -514,10 +514,15 @@ app.registerExtension({
       console.warn("[风格加载器] 恢复 LoRA 列表失败", error);
     }
 
-    if (typeof node.computeSize === "function") {
-      const computed = node.computeSize();
-      const width = node.size?.[0] ?? computed[0];
-      node.setSize([Math.max(width, computed[0]), Math.max(node.size?.[1] ?? 0, computed[1])]);
+    // Only enforce the minimum: the size saved in the workflow is the user's
+    // choice and must be preserved, never snapped back to the computed default.
+    if (typeof node.computeSize === "function" && typeof node.setSize === "function") {
+      const [minWidth, minHeight] = node.computeSize();
+      const width = node.size?.[0] ?? minWidth;
+      const height = node.size?.[1] ?? minHeight;
+      if (width < minWidth || height < minHeight) {
+        node.setSize([Math.max(width, minWidth), Math.max(height, minHeight)]);
+      }
     }
     node.setDirtyCanvas?.(true, true);
   },

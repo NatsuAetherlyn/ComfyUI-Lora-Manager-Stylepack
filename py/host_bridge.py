@@ -238,26 +238,24 @@ def get_node_utils() -> ModuleType:
 
 
 def get_settings_dir() -> str:
-    """Return the host pack's settings directory, falling back to a local one.
+    """Return the Stylepack preset directory inside the ComfyUI user folder.
 
-    The fallback keeps presets working (stored beside this subpack) even if the
-    host pack's settings helper is unavailable, rather than failing outright.
+    Presets are deliberately kept in ``<ComfyUI>/user/lora_manager_stylepack``
+    rather than the host pack's settings directory so they survive host
+    updates and live under the ComfyUI root alongside the rest of the install.
     """
-    module = _bridge.import_submodule("py.utils.settings_paths")
-    if module is not None:
-        getter = getattr(module, "get_settings_dir", None)
-        if callable(getter):
-            try:
-                return getter()
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.warning(
-                    "[Style Loader] host get_settings_dir() failed: %s", exc
-                )
+    try:
+        import folder_paths  # type: ignore
 
-    fallback = os.path.join(_bridge._stylepack_dir(), "data")
-    os.makedirs(fallback, exist_ok=True)
-    logger.info("[Style Loader] using local preset directory: %s", fallback)
-    return fallback
+        target = os.path.join(
+            folder_paths.get_user_directory(), "lora_manager_stylepack"
+        )
+    except ImportError:
+        # Running outside ComfyUI (e.g. under pytest) — stay local.
+        target = os.path.join(_bridge._stylepack_dir(), "data")
+
+    os.makedirs(target, exist_ok=True)
+    return target
 
 
 def register_metadata_extractor(class_name: str) -> bool:

@@ -126,7 +126,7 @@ class StyleLoaderLM:
         format_loaded = helpers["_format_loaded_loras"]
 
         lora_entries: List[Dict[str, Any]] = collect_stack(kwargs.get("lora_stack"))
-        lora_entries.extend(collect_widgets(kwargs))
+        lora_entries.extend(collect_widgets(_read_widget_value(kwargs, "loras") or []))
 
         nunchaku_kind = self._detect_nunchaku_kind(model)
 

@@ -130,6 +130,50 @@ handle.dispatch('pointermove', { pointerId: 2, clientY: -9999 });
 handle.dispatch('pointerup', { pointerId: 2 });
 ok(text.getTextHeight() === MIN_TEXT_HEIGHT, 'drag clamps at min');
 
+console.log('\n[USER-DRAGGED NODE SIZE SURVIVES TOGGLING (regression)]');
+{
+  // Reproduces the reported bug: the user enlarges the node, then toggles the
+  // text box, and the node collapses back to its computed default.
+  const n2 = makeNode();
+  const t2 = addStyleTextWidget(n2, 'style_text', {});
+  // Something flexible must exist, like the real loras widget.
+  n2.addDOMWidget('loras', 'custom', document.createElement('div'),
+                  { getValue: () => [], setValue: () => {} });
+
+  const minH = n2.computeSize()[1];
+  const userHeight = minH + 400;      // user drags the node much taller
+  n2.setSize([520, userHeight]);
+  ok(n2.size[1] === userHeight, `user sized the node to ${userHeight}px`);
+
+  // Open the text box: the node must GROW by the widget delta, not reset.
+  const openDelta = HEADER_HEIGHT + DEFAULT_TEXT_HEIGHT + 8 - HEADER_HEIGHT;
+  t2.setEnabled(true);
+  ok(n2.size[1] === userHeight + openDelta,
+     `opening grew node to ${n2.size[1]} (= ${userHeight} + ${openDelta}), not reset to ${minH}`);
+  ok(n2.size[0] === 520, 'user width preserved');
+
+  // Closing must give exactly that space back, returning to the user's height.
+  t2.setEnabled(false);
+  ok(n2.size[1] === userHeight,
+     `closing returned to the user's ${userHeight}px`);
+
+  // Dragging the handle taller must also be a pure delta.
+  t2.setEnabled(true);
+  const beforeDrag = n2.size[1];
+  t2.setTextHeight(DEFAULT_TEXT_HEIGHT + 50);
+  ok(n2.size[1] === beforeDrag + 50,
+     `text height +50 grew the node by exactly 50 (${beforeDrag} -> ${n2.size[1]})`);
+
+  // Never shrink below the node minimum.
+  const n3 = makeNode();
+  const t3 = addStyleTextWidget(n3, 'style_text', { enabled: true });
+  n3.addDOMWidget('loras', 'custom', document.createElement('div'),
+                  { getValue: () => [], setValue: () => {} });
+  n3.setSize([400, n3.computeSize()[1]]);   // already at minimum
+  t3.setEnabled(false);
+  ok(n3.size[1] >= n3.computeSize()[1], 'never shrinks below the node minimum');
+}
+
 console.log('\n[toggle round-trip preserves height and content]');
 text.setText('artist string');
 text.setTextHeight(150);

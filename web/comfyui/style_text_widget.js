@@ -234,16 +234,36 @@ export function addStyleTextWidget(node, name, opts = {}) {
 
   // ------------------------------------------------------------ resizing
   /**
-   * Resize the node to fit its widgets. Discrete user actions only.
+   * Grow or shrink the node by exactly how much this widget's height changed.
+   *
+   * Deliberately *not* `node.setSize(node.computeSize())`: computeSize() returns
+   * the node's *minimum* height, so snapping to it would discard whatever extra
+   * space the user had dragged out — the node would collapse to its default on
+   * every toggle. Applying a delta keeps the LoRA list exactly as tall as the
+   * user left it.
+   *
+   * @param {number} delta - Change in this widget's height, in pixels.
    */
-  const resizeNodeToFit = () => {
-    if (typeof node.computeSize !== "function") {
+  const growNodeBy = (delta) => {
+    if (!delta || typeof node.setSize !== "function") {
       return;
     }
-    const computed = node.computeSize();
-    const currentWidth = node.size?.[0] ?? computed[0];
-    // Never shrink below what the widgets need, but keep the user's width.
-    node.setSize([Math.max(currentWidth, computed[0]), computed[1]]);
+
+    const currentWidth = node.size?.[0] ?? 0;
+    const currentHeight = node.size?.[1] ?? 0;
+    let nextHeight = currentHeight + delta;
+
+    // Still respect the node's minimum so shrinking cannot clip other widgets.
+    if (typeof node.computeSize === "function") {
+      const minHeight = node.computeSize()[1];
+      if (nextHeight < minHeight) {
+        nextHeight = minHeight;
+      }
+    }
+
+    if (nextHeight !== currentHeight) {
+      node.setSize([currentWidth, nextHeight]);
+    }
     node.setDirtyCanvas?.(true, true);
   };
 
@@ -252,10 +272,11 @@ export function addStyleTextWidget(node, name, opts = {}) {
     if (next === textHeight) {
       return textHeight;
     }
+    const before = computeWidgetHeight(enabled, textHeight);
     textHeight = next;
     applyLayoutMode();
-    if (resize && enabled) {
-      resizeNodeToFit();
+    if (resize) {
+      growNodeBy(computeWidgetHeight(enabled, textHeight) - before);
     }
     return textHeight;
   };
@@ -265,10 +286,11 @@ export function addStyleTextWidget(node, name, opts = {}) {
     if (next === enabled) {
       return enabled;
     }
+    const before = computeWidgetHeight(enabled, textHeight);
     enabled = next;
     applyLayoutMode();
     if (resize) {
-      resizeNodeToFit();
+      growNodeBy(computeWidgetHeight(enabled, textHeight) - before);
     }
     return enabled;
   };
@@ -320,8 +342,13 @@ export function addStyleTextWidget(node, name, opts = {}) {
     handle.classList.remove("lmsp-text-resize-handle--active");
     document.body.classList.remove("lmsp-text-resizing");
 
+    // pointermove mutated textHeight directly (to keep the DOM live without
+    // resizing the node mid-drag), so settle up with a single delta here.
     if (enabled) {
-      resizeNodeToFit();
+      growNodeBy(
+        computeWidgetHeight(enabled, textHeight) -
+          computeWidgetHeight(enabled, dragStartHeight)
+      );
     }
     opts.onHeightChange?.(textHeight);
   };
