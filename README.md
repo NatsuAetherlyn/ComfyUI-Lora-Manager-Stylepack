@@ -21,12 +21,8 @@
 1. 先装好 [ComfyUI-Lora-Manager](https://github.com/willmiao/ComfyUI-Lora-Manager)；
 2. 把本仓库克隆或解压到 `ComfyUI/custom_nodes/ComfyUI-Lora-Manager-Stylepack`；
 3. **运行一次注册脚本**（给主包打上兼容补丁，详见下文「对主包本身的改动」）：
-
-   ```bash
-   python scripts/register_with_host.py
-   ```
-
-   脚本会自动定位同目录下的主包；主包在别处时把路径传进去即可：`python scripts/register_with_host.py <主包路径>`。
+   - **Windows：双击 `register_with_host.bat` 即可**。它会自动找一个能用的 Python（系统安装的、或整合包自带的都行），跑完窗口会停住等你按键，不会一闪而过。
+   - macOS / Linux / 命令行党：`python scripts/register_with_host.py`。
 4. 重启 ComfyUI（浏览器端最好硬刷新一次，清掉旧的前端缓存）。
 
 节点位于 `Lora Manager/loaders` 分类下，显示名**风格加载器**（内部类名 `Style Loader (LoraManager)`）。默认行为与主包的「Lora 加载器」完全一致，额外提供下述功能。
@@ -90,9 +86,9 @@ DELETE /api/lm/style-presets/{id}
 
 | 命令 | 作用 |
 |---|---|
-| `python scripts/register_with_host.py` | 打补丁（自动定位主包，或传入主包路径） |
-| `python scripts/register_with_host.py --check` | 只报告哪些文件还没打，不改动 |
-| `python scripts/register_with_host.py --restore` | 从备份还原主包原文件 |
+| 双击 `register_with_host.bat`（或 `python scripts/register_with_host.py`） | 打补丁（自动定位主包，或把主包路径作为参数传入） |
+| `register_with_host.bat --check` | 只报告哪些文件还没打，不改动 |
+| `register_with_host.bat --restore` | 从备份还原主包原文件 |
 
 如果主包哪天改到锚点都对不上了，脚本会报出具体是哪个文件、哪处对不上，并原样保持你的文件不动（不会打一半）。这时请带上主包版本号到 [Issues](https://github.com/NatsuAetherlyn/ComfyUI-Lora-Manager-Stylepack/issues) 反馈。
 
