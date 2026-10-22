@@ -17,6 +17,8 @@ from ..services.style_preset_service import (
     normalize_loras,
     normalize_name,
     normalize_text,
+    normalize_group,
+    normalize_preview,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,8 +91,13 @@ class StylePresetRoutes:
             name = normalize_name(body.get("name"))
             text = normalize_text(body.get("text"))
             loras = normalize_loras(body.get("loras"))
+            group = normalize_group(body.get("group"))
+            order = int(body.get("order", 0)) if body.get("order") is not None else 0
+            preview = normalize_preview(body.get("preview"))
         except StylePresetError as exc:
             return _error(str(exc))
+        except (TypeError, ValueError):
+            return _error("Invalid 'order' value.")
 
         overwrite = bool(body.get("overwrite"))
 
@@ -106,7 +113,8 @@ class StylePresetRoutes:
                 for existing in self._manager.get_all():
                     if str(existing.get("name", "")).strip().casefold() == name.casefold():
                         updated = self._manager.update(
-                            existing["id"], name=name, text=text, loras=loras
+                            existing["id"], name=name, text=text, loras=loras, 
+                            group=group, order=order, preview=preview
                         )
                         if updated is not None:
                             return web.json_response(
@@ -114,7 +122,8 @@ class StylePresetRoutes:
                             )
                         break
 
-            preset = self._manager.create(name=name, text=text, loras=loras)
+            preset = self._manager.create(name=name, text=text, loras=loras, 
+                                          group=group, order=order, preview=preview)
         except OSError as exc:
             return _error(f"Could not write the preset file: {exc}", 500)
         except Exception as exc:
@@ -142,10 +151,15 @@ class StylePresetRoutes:
             name = normalize_name(body["name"]) if "name" in body else None
             text = normalize_text(body["text"]) if "text" in body else None
             loras = normalize_loras(body["loras"]) if "loras" in body else None
+            group = normalize_group(body["group"]) if "group" in body else None
+            order = int(body["order"]) if "order" in body else None
+            preview = normalize_preview(body["preview"]) if "preview" in body else None
         except StylePresetError as exc:
             return _error(str(exc))
+        except (TypeError, ValueError):
+            return _error("Invalid 'order' value.")
 
-        if name is None and text is None and loras is None:
+        if name is None and text is None and loras is None and group is None and order is None and preview is None:
             return _error("Nothing to update.")
 
         try:
@@ -155,7 +169,7 @@ class StylePresetRoutes:
                 )
 
             preset = self._manager.update(
-                preset_id, name=name, text=text, loras=loras
+                preset_id, name=name, text=text, loras=loras, group=group, order=order, preview=preview
             )
         except OSError as exc:
             return _error(f"Could not write the preset file: {exc}", 500)

@@ -468,6 +468,84 @@ app.registerExtension({
 
       return extra;
     };
+
+    // Add a launch button for the preset manager GUI
+    chainCallback(nodeType.prototype, "onDrawForeground", function (ctx) {
+      if (this.flags.collapsed) {
+        return;
+      }
+
+      const buttonSize = 20;
+      const margin = 6;
+      const x = this.size[0] - buttonSize - margin;
+      const y = -LiteGraph.NODE_TITLE_HEIGHT + (LiteGraph.NODE_TITLE_HEIGHT - buttonSize) / 2;
+
+      // Button background
+      ctx.fillStyle = "rgba(66, 153, 224, 0.15)";
+      ctx.beginPath();
+      ctx.roundRect(x, y, buttonSize, buttonSize, 4);
+      ctx.fill();
+
+      // Check hover
+      const mouse = this.graph?.list_of_graphcanvas?.[0]?.canvas_mouse;
+      if (mouse) {
+        const [mouseX, mouseY] = this.graph.list_of_graphcanvas[0].convertEventToCanvasOffset(mouse);
+        const nodeMouseX = mouseX - this.pos[0];
+        const nodeMouseY = mouseY - this.pos[1];
+        
+        const isHovering = nodeMouseX >= x && nodeMouseX <= x + buttonSize &&
+                          nodeMouseY >= y && nodeMouseY <= y + buttonSize;
+        
+        if (isHovering) {
+          ctx.fillStyle = "rgba(66, 153, 224, 0.3)";
+          ctx.fill();
+        }
+      }
+
+      // Icon (bookmark)
+      ctx.strokeStyle = "#4299e0";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      const iconMargin = 4;
+      const ix = x + iconMargin;
+      const iy = y + iconMargin;
+      const iw = buttonSize - iconMargin * 2;
+      const ih = buttonSize - iconMargin * 2;
+      
+      // Bookmark shape
+      ctx.moveTo(ix, iy);
+      ctx.lineTo(ix + iw, iy);
+      ctx.lineTo(ix + iw, iy + ih);
+      ctx.lineTo(ix + iw / 2, iy + ih - 3);
+      ctx.lineTo(ix, iy + ih);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Store button bounds for click detection
+      this.__lmspButtonBounds = { x, y, width: buttonSize, height: buttonSize };
+    });
+
+    // Handle clicks on the launch button
+    chainCallback(nodeType.prototype, "onMouseDown", function (event, localPos) {
+      if (!this.__lmspButtonBounds) {
+        return;
+      }
+
+      const { x, y, width, height } = this.__lmspButtonBounds;
+      if (localPos[0] >= x && localPos[0] <= x + width &&
+          localPos[1] >= y && localPos[1] <= y + height) {
+        
+        const url = new URL("/extensions/ComfyUI-Lora-Manager-Stylepack/preset_manager.html", window.location.origin).href;
+        
+        if (event.shiftKey) {
+          window.open(url, "_blank", "width=1200,height=800");
+        } else {
+          window.open(url, "_blank");
+        }
+        
+        return true; // Consume event
+      }
+    });
   },
 
   async loadedGraphNode(node) {

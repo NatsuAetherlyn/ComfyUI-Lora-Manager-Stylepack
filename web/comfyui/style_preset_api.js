@@ -14,6 +14,8 @@ const BASE = "/api/lm/style-presets";
  * @property {string} text
  * @property {Array<{name: string, strength: number, clipStrength: number,
  *                   active: boolean, expanded: boolean}>} loras
+ * @property {string} group
+ * @property {number} order
  * @property {string} created_at
  * @property {string} updated_at
  */
@@ -74,7 +76,7 @@ export async function listPresets() {
 
 /**
  * Create a preset, optionally overwriting one with the same name.
- * @param {{name: string, text: string, loras: Array<Object>, overwrite?: boolean}} payload
+ * @param {{name: string, text: string, loras: Array<Object>, group?: string, order?: number, overwrite?: boolean}} payload
  */
 export async function createPreset(payload) {
   const result = await request(BASE, jsonInit("POST", payload));
@@ -89,7 +91,7 @@ export async function createPreset(payload) {
 /**
  * Patch a preset. Omitted fields are left unchanged.
  * @param {string} presetId
- * @param {{name?: string, text?: string, loras?: Array<Object>}} patch
+ * @param {{name?: string, text?: string, loras?: Array<Object>, group?: string, order?: number}} patch
  */
 export async function updatePreset(presetId, patch) {
   const result = await request(

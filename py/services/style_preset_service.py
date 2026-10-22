@@ -28,7 +28,7 @@ from ..host_bridge import get_settings_dir
 logger = logging.getLogger(__name__)
 
 PRESETS_FILENAME = "style_presets.json"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Keys copied from a submitted LoRA entry. Anything else the frontend sends
 # (transient UI state such as `selected`) is dropped so presets stay stable.
@@ -36,6 +36,8 @@ _LORA_FIELDS = ("name", "strength", "clipStrength", "active", "expanded")
 
 MAX_NAME_LENGTH = 120
 MAX_TEXT_LENGTH = 20000
+MAX_GROUP_LENGTH = 60
+MAX_PREVIEW_LENGTH = 10 * 1024 * 1024  # 10MB in base64
 
 
 class StylePresetError(ValueError):
@@ -108,6 +110,20 @@ def normalize_name(raw: Any) -> str:
     return name
 
 
+def normalize_group(raw: Any) -> str:
+    """Validate and normalize a preset group name."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return ""
+    if not isinstance(raw, str):
+        raise StylePresetError("'group' must be a string.")
+    group = raw.strip()
+    if len(group) > MAX_GROUP_LENGTH:
+        raise StylePresetError(
+            f"Group name is too long (max {MAX_GROUP_LENGTH} characters)."
+        )
+    return group
+
+
 def normalize_text(raw: Any) -> str:
     if raw is None:
         return ""
@@ -117,6 +133,26 @@ def normalize_text(raw: Any) -> str:
         raise StylePresetError(
             f"Preset text is too long (max {MAX_TEXT_LENGTH} characters)."
         )
+    return raw
+
+
+def normalize_preview(raw: Any) -> str:
+    """Validate and normalize preview image data (base64 DataURL)."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return ""
+    if not isinstance(raw, str):
+        raise StylePresetError("'preview' must be a string.")
+    
+    # Validate DataURL format
+    if not raw.startswith("data:image/"):
+        raise StylePresetError("'preview' must be a valid image DataURL (data:image/...).")
+    
+    # Check size limit
+    if len(raw) > MAX_PREVIEW_LENGTH:
+        raise StylePresetError(
+            f"Preview image is too large (max {MAX_PREVIEW_LENGTH // (1024 * 1024)}MB)."
+        )
+    
     return raw
 
 
@@ -209,6 +245,20 @@ class StylePresetManager:
             if not isinstance(text, str):
                 text = ""
 
+            # Schema v2 additions: group and order
+            group = preset.get("group", "")
+            if not isinstance(group, str):
+                group = ""
+
+            order = preset.get("order", 0)
+            if not isinstance(order, (int, float)):
+                order = 0
+
+            # Schema v2.1 addition: preview
+            preview = preset.get("preview", "")
+            if not isinstance(preview, str):
+                preview = ""
+
             timestamp = preset.get("updated_at") or preset.get("created_at") or _utc_now()
             cleaned.append(
                 {
@@ -216,6 +266,9 @@ class StylePresetManager:
                     "name": name.strip(),
                     "text": text,
                     "loras": loras,
+                    "group": group.strip(),
+                    "order": int(order),
+                    "preview": preview,
                     "created_at": preset.get("created_at") or timestamp,
                     "updated_at": timestamp,
                 }
@@ -271,11 +324,20 @@ class StylePresetManager:
     # ------------------------------------------------------------------ public
 
     def get_all(self) -> List[Dict[str, Any]]:
-        """Return every preset, most recently updated first."""
+        """Return every preset, grouped and sorted by order, then by updated_at."""
         with self._lock:
             self._ensure_loaded()
             presets = list(self._data["presets"])
-        presets.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
+        
+        # Sort by: group (alphabetically), order (ascending), updated_at (descending)
+        presets.sort(
+            key=lambda item: (
+                item.get("group", "").strip(),
+                item.get("order", 0),
+                -(int(datetime.fromisoformat(item.get("updated_at", "")).timestamp()) 
+                  if item.get("updated_at") else 0)
+            )
+        )
         return presets
 
     def get(self, preset_id: str) -> Optional[Dict[str, Any]]:
@@ -299,7 +361,7 @@ class StylePresetManager:
         return False
 
     def create(
-        self, name: str, text: str, loras: List[Dict[str, Any]]
+        self, name: str, text: str, loras: List[Dict[str, Any]], group: str = "", order: int = 0, preview: str = ""
     ) -> Dict[str, Any]:
         """Create a new preset. Caller should check ``name_exists`` first."""
         now = _utc_now()
@@ -308,6 +370,9 @@ class StylePresetManager:
             "name": name,
             "text": text,
             "loras": loras,
+            "group": group,
+            "order": order,
+            "preview": preview,
             "created_at": now,
             "updated_at": now,
         }
@@ -324,6 +389,9 @@ class StylePresetManager:
         name: Optional[str] = None,
         text: Optional[str] = None,
         loras: Optional[List[Dict[str, Any]]] = None,
+        group: Optional[str] = None,
+        order: Optional[int] = None,
+        preview: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Patch an existing preset. Only provided fields change.
 
@@ -342,6 +410,12 @@ class StylePresetManager:
                 preset["text"] = text
             if loras is not None:
                 preset["loras"] = loras
+            if group is not None:
+                preset["group"] = group
+            if order is not None:
+                preset["order"] = order
+            if preview is not None:
+                preset["preview"] = preview
             preset["updated_at"] = _utc_now()
             self._save()
             logger.info(

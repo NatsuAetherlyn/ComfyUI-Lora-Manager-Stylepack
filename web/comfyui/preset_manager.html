@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Style Preset Manager - 风格预设管理器</title>
+  <link rel="stylesheet" href="preset_manager.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <h1 class="app-title">
+          <svg class="app-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+          </svg>
+          风格预设管理器
+        </h1>
+        <span class="preset-count" id="presetCount">0 个预设</span>
+      </div>
+      <div class="header-actions">
+        <div class="search-box">
+          <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+          <input type="text" id="searchInput" placeholder="搜索预设..." />
+        </div>
+        <button class="btn btn-primary" id="addPresetBtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          新建预设
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="app-main">
+      <!-- Sidebar - Groups -->
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <h2>分组</h2>
+          <button class="btn-icon" id="manageGroupsBtn" title="管理分组">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/>
+            </svg>
+          </button>
+        </div>
+        <nav class="groups-list" id="groupsList">
+          <button class="group-item group-item--active" data-group="">
+            <span class="group-name">全部预设</span>
+            <span class="group-count">0</span>
+          </button>
+        </nav>
+      </aside>
+
+      <!-- Preset Grid -->
+      <section class="preset-grid-container">
+        <div class="presets-grid" id="presetsGrid">
+          <!-- Presets will be dynamically loaded here -->
+        </div>
+        <div class="empty-state" id="emptyState" style="display: none;">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+          </svg>
+          <h3>还没有预设</h3>
+          <p>点击「新建预设」创建第一个</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal for Create/Edit Preset -->
+  <div class="modal" id="presetModal" style="display: none;">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="modalTitle">新建预设</h2>
+        <button class="btn-close" id="modalCloseBtn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form id="presetForm">
+          <div class="form-group">
+            <label for="presetName">预设名称 <span class="required">*</span></label>
+            <input type="text" id="presetName" name="name" required maxlength="120" placeholder="输入预设名称" />
+          </div>
+          
+          <div class="form-group">
+            <label for="presetGroup">分组</label>
+            <input type="text" id="presetGroup" name="group" maxlength="60" placeholder="留空表示不分组" list="groupSuggestions" />
+            <datalist id="groupSuggestions"></datalist>
+          </div>
+
+          <div class="form-group">
+            <label for="presetText">预设文本</label>
+            <textarea id="presetText" name="text" rows="4" maxlength="20000" placeholder="触发词或画师串..."></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>LoRA 列表</label>
+            <div class="lora-list" id="loraList">
+              <div class="lora-empty">未添加任何 LoRA</div>
+            </div>
+            <button type="button" class="btn btn-secondary" id="addLoraBtn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              添加 LoRA
+            </button>
+          </div>
+
+          <div class="form-group">
+            <label for="presetPreview">预览图</label>
+            <div class="preview-upload">
+              <div class="preview-container" id="previewContainer">
+                <div class="preview-placeholder">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+                    <path d="m21 15-5-5L5 21"/>
+                  </svg>
+                  <span>点击或拖拽上传图片</span>
+                </div>
+                <img id="previewImage" style="display: none;" />
+                <button type="button" class="btn-remove-preview" id="removePreviewBtn" style="display: none;">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              </div>
+              <input type="file" id="presetPreview" name="preview" accept="image/*" style="display: none;" />
+              <div class="preview-hint">支持 JPG、PNG、WebP 格式，建议尺寸 768×1024（3:4 比例）</div>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="modalCancelBtn">取消</button>
+        <button type="submit" class="btn btn-primary" id="modalSaveBtn">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for Add LoRA -->
+  <div class="modal" id="loraModal" style="display: none;">
+    <div class="modal-overlay"></div>
+    <div class="modal-content modal-small">
+      <div class="modal-header">
+        <h2>添加 LoRA</h2>
+        <button class="btn-close" id="loraModalCloseBtn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form id="loraForm">
+          <div class="form-group">
+            <label for="loraName">LoRA 名称 <span class="required">*</span></label>
+            <input type="text" id="loraName" name="name" required placeholder="例如: my_lora" />
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label for="loraStrength">模型强度</label>
+              <input type="number" id="loraStrength" name="strength" min="0" max="2" step="0.01" value="1.0" />
+            </div>
+            <div class="form-group">
+              <label for="loraClipStrength">CLIP 强度</label>
+              <input type="number" id="loraClipStrength" name="clipStrength" min="0" max="2" step="0.01" value="1.0" />
+            </div>
+          </div>
+
+          <div class="form-group form-checkbox">
+            <label>
+              <input type="checkbox" id="loraActive" name="active" checked />
+              <span>启用</span>
+            </label>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="loraModalCancelBtn">取消</button>
+        <button type="submit" class="btn btn-primary" id="loraModalSaveBtn">添加</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="preset_manager.js"></script>
+</body>
+</html>
