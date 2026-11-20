@@ -19,17 +19,14 @@ export const STYLE_LOADER_CLASS = "Style Loader (LoraManager)";
 const STYLE_TEXT_WIDGET = "style_text";
 const STYLE_STATE_WIDGET = "style_state";
 
-// Announce ourselves before the host pack's utils.js evaluates, in case
-// ComfyUI loads our script first. `registerLoraNodeClass` picks this up.
-// `terminal: true` marks us as applying LoRAs to a model (like Lora Loader)
-// rather than forwarding a LORA_STACK.
-if (!Array.isArray(window.__LM_EXTRA_LORA_NODE_CLASSES)) {
-  window.__LM_EXTRA_LORA_NODE_CLASSES = [];
-}
-window.__LM_EXTRA_LORA_NODE_CLASSES.push({
-  name: STYLE_LOADER_CLASS,
-  terminal: true,
-});
+// The host pack's LoRA-node adapter API (added upstream on 2026-11-13, commit
+// "Add third-party LoRA node adapter API") is the supported way for a subpack
+// to join its node registry. The older `__LM_EXTRA_LORA_NODE_CLASSES` global is
+// no longer read by the host, so registering through it did nothing.
+//
+// Registration happens in the extension's setup() below and is entirely
+// optional: without it the node still loads and runs, it just is not offered
+// as a "send to ComfyUI" target and its trigger words are not auto-synced.
 
 // ComfyUI mounts each pack's web dir at /extensions/<name>/. Both the
 // pyproject project name and the directory name get registered, and their
@@ -62,6 +59,40 @@ async function importFromHost(relativePath) {
 
 /** Cache the resolved host modules; the node may be created many times. */
 let hostModulesPromise = null;
+
+/**
+ * Load the host pack's LoRA-node adapter API, or null when it is unavailable.
+ *
+ * Deliberately dynamic: a static import of a module that an older host pack
+ * does not ship would fail to parse and take this whole extension down with
+ * it. The adapter is an optional integration, so a miss is not an error.
+ */
+let adapterApiPromise = null;
+function loadAdapterApi() {
+  if (!adapterApiPromise) {
+    adapterApiPromise = (async () => {
+      try {
+        const api = await importFromHost("lora_node_adapters.js");
+        if (api?.LORA_NODE_ADAPTER_API_VERSION !== 1) {
+          console.warn(
+            "[风格加载器] 主包的 LoRA 节点 adapter API 版本不兼容，跳过注册",
+            api?.LORA_NODE_ADAPTER_API_VERSION
+          );
+          return null;
+        }
+        return api;
+      } catch (error) {
+        // Older host pack, or the module was renamed: the node still works.
+        console.info(
+          "[风格加载器] 主包未提供 LoRA 节点 adapter API，跳过注册",
+          error?.message ?? error
+        );
+        return null;
+      }
+    })();
+  }
+  return adapterApiPromise;
+}
 
 function loadHostModules() {
   if (!hostModulesPromise) {
@@ -208,8 +239,107 @@ function parseState(raw) {
   }
 }
 
+/**
+ * Register this node with the host pack's LoRA-node adapter API.
+ *
+ * The host owns the "send to ComfyUI" pipeline: it looks up an adapter by
+ * `comfyClass`, calls `applyLoraCode`, then refreshes connected trigger-word
+ * toggles through `getActiveLoraNames`. Without an adapter the node is simply
+ * not offered as a target, so this is a pure opt-in.
+ *
+ * Both callbacks must read and write the *authoritative* state, which for this
+ * node is `lorasWidget` (the `loras` widget). The `text` search box is a mirror
+ * that `load_style` deliberately ignores.
+ *
+ * @returns {Promise<boolean>} True when the adapter was registered.
+ */
+async function registerLoraAdapter() {
+  const api = await loadAdapterApi();
+  if (!api) {
+    return false;
+  }
+
+  // Only lora_selection.js is needed here. Going through loadHostModules()
+  // would couple the adapter to every other host module the widgets need, and
+  // a failure in any one of those would silently disable the adapter too.
+  let selection;
+  try {
+    selection = await importFromHost("lora_selection.js");
+  } catch (error) {
+    console.warn("[风格加载器] 主包 lora_selection.js 不可用，跳过 adapter 注册", error);
+    return false;
+  }
+
+  const { applyLoraSet, parseLoraCodeTags } = selection ?? {};
+  if (typeof applyLoraSet !== "function" || typeof parseLoraCodeTags !== "function") {
+    console.warn("[风格加载器] 主包 lora_selection.js 缺少所需函数，跳过 adapter 注册");
+    return false;
+  }
+
+  try {
+    api.registerLoraNodeAdapter({
+      id: "lora-manager-stylepack",
+      apiVersion: 1,
+      nodeClasses: [STYLE_LOADER_CLASS],
+
+      applyLoraCode({ node, loraCode, mode }) {
+        const lorasWidget = node?.lorasWidget;
+        if (!lorasWidget) {
+          throw new Error("Style Loader 的 loras 组件尚未就绪");
+        }
+
+        // Strip <lora:...> tags into selection entries, then apply them with
+        // the host's own merge logic so strengths, duplicates and the saved
+        // `active` flag behave exactly as they do for the built-in loaders.
+        const entries = parseLoraCodeTags(loraCode).map((tag) => ({
+          name: tag.name,
+          strength: tag.strength,
+        }));
+        if (!entries.length) {
+          return;
+        }
+
+        const result = applyLoraSet(lorasWidget.value || [], entries, {
+          mode: mode === "replace" ? "replace" : "append",
+        });
+        if (!result.changed) {
+          return;
+        }
+
+        // Assigning `value` only re-renders the rows; the widget callback is
+        // what propagates the new set to the text mirror, trigger words and
+        // downstream loaders. Mirror the host's own ordering.
+        lorasWidget.value = result.loras;
+        lorasWidget.callback?.(result.loras);
+        node.setDirtyCanvas?.(true, true);
+      },
+
+      getActiveLoraNames(node) {
+        const value = node?.lorasWidget?.value;
+        if (!Array.isArray(value)) {
+          return [];
+        }
+        return value
+          .filter((entry) => entry && entry.active)
+          .map((entry) => entry.name)
+          .filter((name) => typeof name === "string" && name);
+      },
+    });
+  } catch (error) {
+    // Duplicate registration or an API mismatch: never fatal for the node.
+    console.warn("[风格加载器] 注册 LoRA adapter 失败", error);
+    return false;
+  }
+
+  return true;
+}
+
 app.registerExtension({
   name: "LoraManagerStylepack.StyleLoader",
+
+  async setup() {
+    await registerLoraAdapter();
+  },
 
   async beforeRegisterNodeDef(nodeType, nodeData) {
     if (nodeType.comfyClass !== STYLE_LOADER_CLASS) {
@@ -251,7 +381,6 @@ app.registerExtension({
         mergeLoras,
         getWidgetByName,
         getWidgetSerializedValue,
-        registerLoraNodeClass,
       },
       lorasWidget: { addLorasWidget },
       syntaxUtils: { applyLoraValuesToText, debounce },
@@ -259,16 +388,8 @@ app.registerExtension({
       loraInfo: { updateConnectedLoraInfoNodes },
     } = host;
 
-    // Register with the host pack so the standalone web UI lists this node as
-    // a LoRA target and `lora_code_update` messages are accepted for it.
-    if (typeof registerLoraNodeClass === "function") {
-      registerLoraNodeClass(STYLE_LOADER_CLASS, { terminal: true });
-    } else {
-      console.warn(
-        "[风格加载器] 主包版本较旧，缺少 registerLoraNodeClass；" +
-          "独立网页前端的「发送到节点」可能不会列出本节点。"
-      );
-    }
+    // Registry membership is handled by registerLoraAdapter() in setup(), which
+    // goes through the host's public adapter API. Nothing to do per node type.
 
     const [{ addStyleTextWidget, DEFAULT_TEXT_HEIGHT }, { addStylePresetsWidget }] =
       await Promise.all([

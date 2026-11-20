@@ -1,31 +1,51 @@
 #!/usr/bin/env python3
-"""Register Stylepack's LoRA node with the host pack (ComfyUI-Lora-Manager).
+"""Finish wiring Stylepack's node into the host pack (ComfyUI-Lora-Manager).
 
-Stylepack's node works inside ComfyUI without this step. What the host pack
-cannot do *unpatched* is recognise the node as LoRA-capable in its own web
-UI: the standalone page will not offer it in "send to node", the backend
-rejects `lora_code_update` messages for it, trigger-word highlighting will
-not traverse it, and the node selector shows the generic "unknown" icon.
+Almost the whole integration lives in ``web/comfyui/style_loader.js``, which
+registers the node through the host's public LoRA-node adapter API. The node
+loads, runs and applies LoRAs correctly with nothing in this directory applied.
 
-This script applies the small set of edits that add a shared LoRA-node
-registry to the host pack and route those features through it. It is meant
-to survive host-pack updates: every edit is anchored to a short code
-fragment instead of a line number or a full context block, so routine
-upstream churn (import order, unrelated refactors, extra entries in the
-same list) does not break it.
+This script only closes gaps that adapter API version 1 does not cover, and it
+is written to degrade instead of fail: a missing anchor prints a warning and
+leaves the file untouched.
 
-The edits are idempotent -- applying twice changes nothing. Every modified
-file is backed up to ``<host>/.lmstylepack-backup/`` first, and
-``--restore`` puts the originals back.
+Current edits
+-------------
+1. ``py/utils/constants.py`` — add ``NODE_TYPE_EXTENSION_LORA``.
+2. ``py/routes/handlers/misc_handlers.py`` — use it when a LoRA-capable node
+   class is absent from ``NODE_TYPES`` (otherwise it reports type 0 and the
+   node selector renders the generic "unknown" icon).
+3. ``static/js/utils/constants.js`` — type id + icon for that id.
+
+Why the other patches that used to live here are gone
+-----------------------------------------------------
+``lora_loader.js``, ``workflow_registry.js`` and ``utils.js`` now consult the
+adapter registry upstream (commit "Add third-party LoRA node adapter API"), so
+patching them was both redundant and a standing source of bit-rot. The two
+remaining traversal lists are intentionally *not* patched:
+
+* ``trigger_word_highlight.js`` walks downstream from a node along
+  ``LORA_STACK``-shaped outputs. The Style Loader emits MODEL/CLIP/STRINGs, so
+  it is never reached by that walk.
+* ``loras_widget.js`` assigns ``onSelectionChange`` only for its own built-in
+  classes, and the Style Loader installs its own handler first
+  (``style_loader.js``, ``addLorasWidget`` call).
+
+Editing either one would add churn without changing behaviour.
+
+Every edit is anchored to a code fragment, is idempotent, and is skipped with a
+clear message when the host has moved on. Originals are backed up to
+``<host>/.lmstylepack-backup/``; ``--restore`` puts them back.
 
 Usage:
     python scripts/register_with_host.py                  # auto-locate host pack
     python scripts/register_with_host.py <host-dir>       # explicit path
-    python scripts/register_with_host.py --check          # report status, change nothing
+    python scripts/register_with_host.py --check          # report status only
     python scripts/register_with_host.py --restore        # undo from backups
 
-Exit code is 0 on success (or when ``--check`` finds everything applied),
-1 on any failure.
+Exit codes:
+    0  every edit is applied (or already was)
+    1  an anchor was missing or a write failed
 """
 
 from __future__ import annotations
@@ -38,13 +58,18 @@ from pathlib import Path
 
 BACKUP_DIRNAME = ".lmstylepack-backup"
 
+# Shared with the frontend constants. Kept clear of the built-in 1..4 range so a
+# future upstream node type cannot collide with it.
+EXTENSION_LORA_TYPE_ID = 99
+
+
 # ---------------------------------------------------------------------------
 # Edit primitives
 # ---------------------------------------------------------------------------
 
 
 class AnchorError(Exception):
-    """An anchor could not be found exactly once (or at all)."""
+    """An anchor could not be found exactly once."""
 
 
 def _find_one(content: str, anchor: str, *, path: Path, label: str) -> int:
@@ -56,17 +81,7 @@ def _find_one(content: str, anchor: str, *, path: Path, label: str) -> int:
     return content.index(anchor)
 
 
-def insert_after_line(content: str, anchor: str, insert: str, *, path: Path, label: str) -> str:
-    """Insert ``insert`` on its own line(s) right after the line containing ``anchor``."""
-    pos = _find_one(content, anchor, path=path, label=label)
-    end_of_line = content.index("\n", pos) + 1
-    if not insert.endswith("\n"):
-        insert += "\n"
-    return content[:end_of_line] + insert + content[end_of_line:]
-
-
 def insert_before_line(content: str, anchor: str, insert: str, *, path: Path, label: str) -> str:
-    """Insert ``insert`` on its own line(s) right before the line containing ``anchor``."""
     pos = _find_one(content, anchor, path=path, label=label)
     line_start = content.rfind("\n", 0, pos) + 1
     if not insert.endswith("\n"):
@@ -74,262 +89,98 @@ def insert_before_line(content: str, anchor: str, insert: str, *, path: Path, la
     return content[:line_start] + insert + content[line_start:]
 
 
+def insert_after_line(content: str, anchor: str, insert: str, *, path: Path, label: str) -> str:
+    pos = _find_one(content, anchor, path=path, label=label)
+    end_of_line = content.index("\n", pos) + 1
+    if not insert.endswith("\n"):
+        insert += "\n"
+    return content[:end_of_line] + insert + content[end_of_line:]
+
+
 def replace_block(content: str, old: str, new: str, *, path: Path, label: str) -> str:
-    """Replace an exact multi-line block. Empty ``new`` deletes the block."""
     _find_one(content, old, path=path, label=label)
     return content.replace(old, new, 1)
 
 
 # ---------------------------------------------------------------------------
-# Per-file edit definitions
-#
-# Each entry is (label, applied_marker, fn). ``applied_marker`` is a short
-# string whose presence means the edit is already in place -- that is what
-# makes re-running the script a no-op. Marker checks are intentionally kept
-# inside the edit functions so ``--check`` and ``apply`` share one source of
-# truth.
+# 1. Backend constant
 # ---------------------------------------------------------------------------
-
-REGISTRY_BLOCK = '''/**
- * Single source of truth for "this node class holds a LoRA widget".
- *
- * Governs three behaviours: whether a node is advertised to the standalone
- * web UI as a LoRA target, whether it accepts `lora_code_update` messages,
- * and whether trigger-word highlighting traverses through it.
- *
- * Companion packs (subpacks) extend this instead of patching the callers.
- */
-const LORA_NODE_CLASSES = new Set([
-  "Lora Loader (LoraManager)",
-  "Lora Stacker (LoraManager)",
-  "WanVideo Lora Select (LoraManager)",
-]);
-
-// Terminal loaders end a LoRA chain: they apply LoRAs to a model rather than
-// forwarding a LORA_STACK. Only these receive aggregated trigger word updates
-// from upstream chain nodes.
-const TERMINAL_LORA_LOADER_CLASSES = new Set([
-  "Lora Loader (LoraManager)",
-]);
-
-/**
- * Register an additional LoRA-capable node class.
- * @param {string} comfyClass - The node's comfyClass identifier.
- * @param {{terminal?: boolean}} [options] - Set `terminal` when the node
- *   applies LoRAs to a model (like Lora Loader) rather than forwarding a stack.
- * @returns {boolean} True when the name was accepted.
- */
-export function registerLoraNodeClass(comfyClass, options = {}) {
-  if (typeof comfyClass !== "string" || !comfyClass) {
-    return false;
-  }
-  LORA_NODE_CLASSES.add(comfyClass);
-  if (options?.terminal) {
-    TERMINAL_LORA_LOADER_CLASSES.add(comfyClass);
-  }
-  return true;
-}
-
-// Subpacks whose scripts load before this module can seed the registry via a
-// global array; ComfyUI does not guarantee extension script order. Entries may
-// be a bare class name or `{ name, terminal }`.
-if (typeof window !== "undefined" && Array.isArray(window.__LM_EXTRA_LORA_NODE_CLASSES)) {
-  for (const entry of window.__LM_EXTRA_LORA_NODE_CLASSES) {
-    if (typeof entry === "string") {
-      registerLoraNodeClass(entry);
-    } else if (entry && typeof entry.name === "string") {
-      registerLoraNodeClass(entry.name, { terminal: !!entry.terminal });
-    }
-  }
-}
-
-/**
- * Test whether a node class holds a LoRA widget.
- * @param {string} comfyClass
- * @returns {boolean}
- */
-export function isLoraNodeClass(comfyClass) {
-  return LORA_NODE_CLASSES.has(comfyClass);
-}
-
-/**
- * Test whether a node class terminates a LoRA chain by applying LoRAs.
- * @param {string} comfyClass
- * @returns {boolean}
- */
-export function isTerminalLoraLoaderClass(comfyClass) {
-  return TERMINAL_LORA_LOADER_CLASSES.has(comfyClass);
-}
-
-/**
- * Snapshot of every registered LoRA-capable node class.
- * @returns {string[]}
- */
-export function getLoraNodeClasses() {
-  return Array.from(LORA_NODE_CLASSES);
-}
-
-'''
-
-LOCAL_LORA_SET = """const LORA_NODE_CLASSES = new Set([
-  "Lora Loader (LoraManager)",
-  "Lora Stacker (LoraManager)",
-  "WanVideo Lora Select (LoraManager)",
-  "Create Hook LoRA (LoraManager)",
-]);
-
-"""
 
 
 def edit_py_constants(content: str, path: Path) -> str:
-    marker = "NODE_TYPE_EXTENSION_LORA"
-    if marker in content:
+    if "NODE_TYPE_EXTENSION_LORA" in content:
         return content
-    block = '''
-# Shared type id for LoRA-capable nodes contributed by companion packs. These
+    block = f'''# Type id for LoRA-capable node classes contributed by companion packs. They
 # are absent from NODE_TYPES but still advertise supports_lora, so they get a
-# dedicated id instead of falling back to 0 ("unknown").
-NODE_TYPE_EXTENSION_LORA = 99
+# dedicated id instead of falling back to 0 ("unknown" icon).
+NODE_TYPE_EXTENSION_LORA = {EXTENSION_LORA_TYPE_ID}
+
 '''
+    # Anchor on the comment line so DEFAULT_NODE_COLOR stays attached to it.
     return insert_before_line(
-        content, 'DEFAULT_NODE_COLOR = "#353535"', block, path=path, label="NODE_TYPE_EXTENSION_LORA constant"
+        content,
+        "# Default ComfyUI node color when bgcolor is null",
+        block,
+        path=path,
+        label="NODE_TYPE_EXTENSION_LORA constant",
     )
+
+
+# ---------------------------------------------------------------------------
+# 2. Backend: fall back to that id instead of 0
+# ---------------------------------------------------------------------------
 
 
 def edit_py_misc_handlers(content: str, path: Path) -> str:
-    marker = "NODE_TYPE_EXTENSION_LORA"
-    if marker in content:
+    if "NODE_TYPE_EXTENSION_LORA" in content:
         return content
+
     content = insert_after_line(
-        content, "    DEFAULT_NODE_COLOR,", "    NODE_TYPE_EXTENSION_LORA,", path=path, label="constants import"
+        content,
+        "    DEFAULT_NODE_COLOR,",
+        "    NODE_TYPE_EXTENSION_LORA,",
+        path=path,
+        label="constants import",
     )
+
     old = """        if "supports_lora" in capabilities:
             capabilities["supports_lora"] = bool(capabilities["supports_lora"])
 """
     new = old + """
-            # LoRA-capable node classes contributed by companion packs are not
-            # in NODE_TYPES, which would leave them at type 0 and give them the
-            # generic "unknown" icon in the node selector. Assign the shared
-            # extension type so the UI can render them properly.
+            # LoRA-capable classes from companion packs are not in NODE_TYPES,
+            # which leaves them at type 0 and gives them the generic "unknown"
+            # icon. Assign the shared extension type so the UI can render them.
             if type_id == 0 and capabilities["supports_lora"]:
                 type_id = NODE_TYPE_EXTENSION_LORA
 """
     return replace_block(content, old, new, path=path, label="supports_lora fallback")
 
 
+# ---------------------------------------------------------------------------
+# 3. Frontend: type id + icon
+# ---------------------------------------------------------------------------
+
+
 def edit_js_constants(content: str, path: Path) -> str:
-    marker = "EXTENSION_LORA"
-    if marker in content:
+    if "EXTENSION_LORA" in content:
         return content
-    # Insert EXTENSION_LORA after the WAN_VIDEO_LORA_SELECT entry; the trailing
-    # comma on that line keeps the new entry syntactically safe regardless of
-    # what follows (upstream may append more type ids below it).
+
     content = insert_after_line(
         content,
         "    WAN_VIDEO_LORA_SELECT: 3,",
-        '    // Shared id for LoRA-capable nodes contributed by companion packs.\n'
+        "    // Shared id for LoRA-capable nodes from companion packs.\n"
         "    // Must stay in sync with NODE_TYPE_EXTENSION_LORA in py/utils/constants.py.\n"
-        "    EXTENSION_LORA: 99,",
+        f"    EXTENSION_LORA: {EXTENSION_LORA_TYPE_ID},",
         path=path,
         label="NODE_TYPES.EXTENSION_LORA",
     )
-    content = insert_after_line(
+
+    return insert_after_line(
         content,
         '[NODE_TYPES.WAN_VIDEO_LORA_SELECT]: "fas fa-w",',
         '    [NODE_TYPES.EXTENSION_LORA]: "fas fa-puzzle-piece",',
         path=path,
         label="EXTENSION_LORA icon",
-    )
-    return content
-
-
-def edit_js_utils(content: str, path: Path) -> str:
-    changed = False
-    if "registerLoraNodeClass" not in content:
-        anchor = "export function isLoraChainNode(comfyClass) {"
-        pos = _find_one(content, anchor, path=path, label="registry insertion point")
-        # The registry block goes after the closing brace of isLoraChainNode.
-        close = content.index("\n}\n", pos) + len("\n}\n")
-        content = content[:close] + "\n" + REGISTRY_BLOCK + content[close:]
-        changed = True
-
-    old = """            // If target is a Lora Loader, collect all active loras in the chain and update
-            if (
-              targetNode &&
-              targetNode.comfyClass === "Lora Loader (LoraManager)"
-            ) {"""
-    new = """            // If target is a terminal LoRA loader, collect all active loras in
-            // the chain and update. Registered subpack loaders qualify too.
-            if (
-              targetNode &&
-              isTerminalLoraLoaderClass(targetNode.comfyClass)
-            ) {"""
-    if old in content:
-        content = content.replace(old, new, 1)
-        changed = True
-    elif "isTerminalLoraLoaderClass(targetNode.comfyClass)" not in content:
-        raise AnchorError(f"{path}: downstream-loader check drifted; expected the literal 'Lora Loader (LoraManager)' comparison")
-
-    return content
-
-
-def edit_js_lora_loader(content: str, path: Path) -> str:
-    marker = "isLoraNodeClass"
-    if marker in content:
-        return content
-    content = insert_after_line(
-        content, "  getWidgetSerializedValue,", "  isLoraNodeClass,", path=path, label="utils.js import"
-    )
-    old = """    if (
-      !node ||
-      (node.comfyClass !== "Lora Loader (LoraManager)" &&
-        node.comfyClass !== "Lora Stacker (LoraManager)" &&
-        node.comfyClass !== "WanVideo Lora Select (LoraManager)" &&
-        node.comfyClass !== "Create Hook LoRA (LoraManager)")
-    ) {"""
-    new = """    if (!node || !isLoraNodeClass(node.comfyClass)) {"""
-    return replace_block(content, old, new, path=path, label="lora_code_update class check")
-
-
-def edit_js_trigger_highlight(content: str, path: Path) -> str:
-    marker = "isLoraNodeClass"
-    if marker in content:
-        return content
-    content = insert_after_line(
-        content, "  getNodeKey,", "  isLoraNodeClass,", path=path, label="utils.js import"
-    )
-    content = replace_block(content, LOCAL_LORA_SET, "", path=path, label="local LORA_NODE_CLASSES set")
-    return replace_block(
-        content,
-        "      if (LORA_NODE_CLASSES.has(targetNode.comfyClass)) {",
-        "      if (isLoraNodeClass(targetNode.comfyClass)) {",
-        path=path,
-        label="traversal check",
-    )
-
-
-def edit_js_workflow_registry(content: str, path: Path) -> str:
-    marker = "isLoraNodeClass"
-    if marker in content:
-        return content
-    old_import = 'import { getAllGraphNodes, getNodeReference, getNodeFromGraph, getChildGraphs, chainCallback, getLinkFromGraph } from "./utils.js";'
-    new_import = 'import { getAllGraphNodes, getNodeReference, getNodeFromGraph, getChildGraphs, chainCallback, getLinkFromGraph, isLoraNodeClass } from "./utils.js";'
-    content = replace_block(content, old_import, new_import, path=path, label="utils.js import")
-    old_set = """const LORA_NODE_CLASSES = new Set([
-    "Lora Loader (LoraManager)",
-    "Lora Stacker (LoraManager)",
-    "WanVideo Lora Select (LoraManager)",
-    "Create Hook LoRA (LoraManager)",
-]);
-
-"""
-    content = replace_block(content, old_set, "", path=path, label="local LORA_NODE_CLASSES set")
-    return replace_block(
-        content,
-        "const supportsLora = LORA_NODE_CLASSES.has(node.comfyClass);",
-        "const supportsLora = isLoraNodeClass(node.comfyClass);",
-        path=path,
-        label="supportsLora check",
     )
 
 
@@ -338,10 +189,6 @@ EDITS = [
     ("py/utils/constants.py", edit_py_constants, "NODE_TYPE_EXTENSION_LORA constant"),
     ("py/routes/handlers/misc_handlers.py", edit_py_misc_handlers, "extension-type fallback for subpack nodes"),
     ("static/js/utils/constants.js", edit_js_constants, "EXTENSION_LORA type id + icon"),
-    ("web/comfyui/utils.js", edit_js_utils, "shared LoRA-node registry"),
-    ("web/comfyui/lora_loader.js", edit_js_lora_loader, "accept lora_code_update via registry"),
-    ("web/comfyui/trigger_word_highlight.js", edit_js_trigger_highlight, "traverse highlighting via registry"),
-    ("web/comfyui/workflow_registry.js", edit_js_workflow_registry, "advertise supports_lora via registry"),
 ]
 
 
@@ -355,8 +202,6 @@ def find_host_pack(explicit: str | None) -> Path:
     if explicit:
         candidates.append(Path(explicit))
     else:
-        # The script lives at <stylepack>/scripts/register_with_host.py; the
-        # host pack is normally the sibling custom_nodes directory.
         script_dir = Path(__file__).resolve()
         candidates.append(script_dir.parent.parent.parent / "ComfyUI-Lora-Manager")
         candidates.append(script_dir.parent.parent / "ComfyUI-Lora-Manager")
@@ -368,34 +213,34 @@ def find_host_pack(explicit: str | None) -> Path:
     raise SystemExit(
         "Could not locate the host pack (ComfyUI-Lora-Manager).\n"
         "Pass its path explicitly, e.g.\n"
-        "    python scripts/register_with_host.py E:/ComfyUI/custom_nodes/ComfyUI-Lora-Manager"
+        "    python scripts/register_with_host.py E:/custom_nodes/ComfyUI-Lora-Manager"
     )
 
 
-def collect_results(host: Path) -> list[tuple[str, str, str, str | None]]:
-    """Apply edits in memory. Returns (rel, before, after, description) rows."""
+def collect_results(host: Path) -> list[tuple[str, str, str, str, str | None]]:
+    """Apply edits in memory. Returns (rel, before, after, desc, skip_reason)."""
     rows = []
     for rel, fn, desc in EDITS:
         path = host / rel
         if not path.is_file():
-            raise SystemExit(f"Missing expected host-pack file: {path}")
+            rows.append((rel, "", "", desc, "file not present in this host version"))
+            continue
         before = path.read_text(encoding="utf-8")
         try:
             after = fn(before, path)
         except AnchorError as exc:
-            raise SystemExit(
-                f"{exc}\n\nThe host pack has changed since this script was written.\n"
-                "Open an issue at https://github.com/NatsuAetherlyn/ComfyUI-Lora-Manager-Stylepack/issues\n"
-                "with the host-pack version and the message above."
-            )
-        rows.append((rel, before, after, desc))
+            # Not fatal: the runtime adapter registered by style_loader.js
+            # carries the functional integration on its own.
+            rows.append((rel, before, before, desc, str(exc)))
+            continue
+        rows.append((rel, before, after, desc, None))
     return rows
 
 
 def write_backups(host: Path, rows) -> None:
     backup_root = host / BACKUP_DIRNAME
-    for rel, before, after, _ in rows:
-        if before == after:
+    for rel, before, after, _, _ in rows:
+        if not before or before == after:
             continue
         backup_path = backup_root / rel
         backup_path.parent.mkdir(parents=True, exist_ok=True)
@@ -437,35 +282,48 @@ def main() -> int:
         return restore(host)
 
     rows = collect_results(host)
-    changed = [(rel, before, after, desc) for rel, before, after, desc in rows if before != after]
+    skipped = [r for r in rows if r[4]]
+    changed = [r for r in rows if not r[4] and r[1] != r[2]]
 
     if args.check:
-        if not changed:
+        if not changed and not skipped:
             print("Status: all edits already applied.")
             return 0
-        print(f"Status: {len(changed)} of {len(rows)} file(s) still need edits:")
-        for rel, _, _, desc in changed:
-            print(f"  - {rel} ({desc})")
+        if changed:
+            print(f"Status: {len(changed)} of {len(rows)} file(s) still need edits:")
+            for rel, _, _, desc, _ in changed:
+                print(f"  - {rel} ({desc})")
+        for rel, _, _, desc, reason in skipped:
+            print(f"  ! {rel} skipped ({desc}): {reason}")
         return 1
 
-    if not changed:
+    if not changed and not skipped:
         print("All edits are already in place; nothing to do.")
         return 0
 
-    for rel, before, after, desc in changed:
+    for rel, before, after, desc, _ in changed:
         diff = list(difflib.unified_diff(before.splitlines(), after.splitlines(), lineterm="", n=1))
         added = sum(1 for line in diff if line.startswith("+") and not line.startswith("+++"))
         removed = sum(1 for line in diff if line.startswith("-") and not line.startswith("---"))
         print(f"  {rel}: +{added}/-{removed}  ({desc})")
 
     write_backups(host, rows)
-    for rel, before, after, _ in changed:
+    for rel, _, after, _, reason in changed:
+        if reason:
+            continue
         (host / rel).write_text(after, encoding="utf-8")
 
-    print(f"\nApplied {len(changed)} file edit(s). Originals backed up to {BACKUP_DIRNAME}/.")
+    if changed:
+        print(f"\nApplied {len(changed)} file edit(s). Originals backed up to {BACKUP_DIRNAME}/.")
+    for rel, _, _, desc, reason in skipped:
+        print(f"  ! {rel} skipped ({desc}): {reason}")
+
+    print("\nThe LoRA-node adapter itself needs no patch; it is registered from")
+    print("web/comfyui/style_loader.js at runtime.")
     print("Restart ComfyUI (and hard-refresh the browser) for this to take effect.")
-    print(f"To undo: python {Path(__file__).name} --restore")
-    return 0
+    print(f"To undo the file edits: python {Path(__file__).name} --restore")
+
+    return 1 if skipped else 0
 
 
 if __name__ == "__main__":

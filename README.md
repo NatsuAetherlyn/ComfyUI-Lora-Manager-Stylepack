@@ -72,17 +72,19 @@ DELETE /api/lm/style-presets/{id}
 
 - **Python**：`py/host_bridge.py` 在运行时定位主包，直接复用 `py/nodes/lora_loader.py` 的内部辅助函数，不复制 LoRA 加载逻辑——主包升级后 Nunchaku 检测、clip 强度处理等行为自动跟随。主包缺失时节点仍会注册，执行时给出明确错误，不会拖垮 ComfyUI 启动。
 - **前端**：从 `/extensions/ComfyUI-Lora-Manager/` 动态导入主包的 `loras_widget.js` 等模块（同时探测小写前缀作为降级）。
-- **独立网页前端**：通过注册脚本在主包侧新增的通用扩展点 `registerLoraNodeClass()` 注册自己；注册后网页 UI 的「发送到节点」列表会包含风格加载器，`lora_code_update` 消息也能被正确接收。
+- **独立网页前端**：通过主包官方的第三方 LoRA 节点 adapter API（`registerLoraNodeAdapter`，version 1）注册自己；注册后网页 UI 的「发送到节点」列表会包含风格加载器，`lora_code_update` 消息也能被正确接收，触发词也会自动同步。
 
 ### 与官方未修改主包的兼容性
 
-**兼容。** 本包只导入主包官方就有的导出（`collectActiveLorasFromChain`、`addLorasWidget`、`applyLoraValuesToText` 等）。唯一的新增依赖是 `registerLoraNodeClass`，代码做了存在性判断：主包没有它时只打印一条警告，其余功能全部照常，仅「网页前端把 LoRA 发送到本节点」不可用。
+**兼容，且无需改主包代码。** 功能性集成全部走主包公开的 adapter API——该接口由主包在 2026-11-13 引入（commit `Add third-party LoRA node adapter API`），专门给附属包用。
+
+注册代码做了完整的存在性判断和版本检查（见 `web/comfyui/style_loader.js` 的 `registerLoraAdapter()`）：主包缺少该 API、版本不匹配或模块加载失败时只打印一条提示，节点本身照常加载运行，仅「网页前端把 LoRA 发送到本节点」和触发词自动同步不可用。
 
 > 本包不修改主包的 Vue widget bundle。`AUTOCOMPLETE_TEXT_LORAS` 是按**输入类型**注册的，声明该输入即可获得 LoRA 搜索框。
 
 ### 对主包本身的改动
 
-有一个扩展点需要主包侧配合改动。安装脚本 `scripts/register_with_host.py` 会替你打好这套补丁——它不是傻乎乎地对行号打 `git apply`，而是把每处改动锚定到具体的代码片段，所以能容忍主包的正常更新；同一个改动打两遍是空操作（幂等），改前会自动把原文件备份到主包下的 `.lmstylepack-backup/`。
+功能性集成不需要改主包任何代码。脚本 `scripts/register_with_host.py` 只补一个装饰性缺口：节点在独立网页的节点选择器里会显示通用「未知」图标，因为主包后端只按 `NODE_TYPES` 查 type id。
 
 | 命令 | 作用 |
 |---|---|
@@ -90,19 +92,15 @@ DELETE /api/lm/style-presets/{id}
 | `register_with_host.bat --check` | 只报告哪些文件还没打，不改动 |
 | `register_with_host.bat --restore` | 从备份还原主包原文件 |
 
-如果主包哪天改到锚点都对不上了，脚本会报出具体是哪个文件、哪处对不上，并原样保持你的文件不动（不会打一半）。这时请带上主包版本号到 [Issues](https://github.com/NatsuAetherlyn/ComfyUI-Lora-Manager-Stylepack/issues) 反馈。
-
-偏好手动的话，也可以直接用 `git apply host-pack-changes.patch` 打同一份改动。补丁内容一览：
+补丁只有 3 处，且**锚点对不上时只会警告并跳过该文件，不会中断，也不会把文件改一半**——功能不依赖它，跳过后节点照常可用，只是图标是通用的：
 
 | 文件 | 改动 |
 |---|---|
-| `web/comfyui/utils.js` | 新增共享 `LORA_NODE_CLASSES` 与 `registerLoraNodeClass()` / `isLoraNodeClass()` / `isTerminalLoraLoaderClass()` |
-| `web/comfyui/workflow_registry.js` | 改用共享 registry |
-| `web/comfyui/trigger_word_highlight.js` | 改用共享 registry（消除与 workflow_registry.js 的重复定义） |
-| `web/comfyui/lora_loader.js` | 接受列表改用 registry |
 | `py/utils/constants.py` | 新增 `NODE_TYPE_EXTENSION_LORA = 99` |
 | `py/routes/handlers/misc_handlers.py` | 附属包节点回落到 type 99 |
 | `static/js/utils/constants.js` | type 99 的图标 |
+
+> **历史说明**：早期版本需要给主包打 7 处补丁（往 `utils.js` 注入注册表，并改 `lora_loader.js` / `workflow_registry.js` / `trigger_word_highlight.js`）。主包加入 adapter API 后这些全部不再需要，`host-pack-changes.patch` 已删除。旧机制依赖的全局变量 `window.__LM_EXTRA_LORA_NODE_CLASSES` 现已不被主包读取。
 
 ## 测试
 
